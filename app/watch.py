@@ -535,6 +535,10 @@ class Watch:
                     await self._post(author, f"🔐 TLS certificate for **{a['name']}** expires in **{cert_days} day(s)**.",
                                      level, {"asset": a["id"], "metrics": {"cert_days": cert_days}})
         await net.hub.broadcast({"type": "asset", "asset": self.public(self.asset(a["id"]))})
+        if (new_reported != reported) or not prev.get("vault_synced") or time.time() - prev.get("vault_synced", 0) > 900:
+            net.vault.on_asset(a["id"])  # status changes immediately, otherwise refresh the note every 15 min
+            state["vault_synced"] = time.time()
+            net.store.run("UPDATE assets SET state=? WHERE id=?", (json.dumps(state), a["id"]))
         return state
 
     async def _post(self, author: dict, text: str, severity: str, meta: dict) -> None:

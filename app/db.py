@@ -100,6 +100,10 @@ CREATE TABLE IF NOT EXISTS notifiers (
     last_error TEXT,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS invites (
     id INTEGER PRIMARY KEY,
     code_hash TEXT UNIQUE NOT NULL,

@@ -201,6 +201,7 @@ main { overflow-y:auto; min-width:0; }
     <a class="nl" href="#/notifications"><span class="ico">🔔</span>Notifications<span class="badge" id="noteBadge" hidden></span></a>
     <a class="nl" href="#/monitor"><span class="ico">🛰</span>Monitoring<span class="badge" id="monBadge" hidden></span></a>
     <a class="nl" href="#/agents"><span class="ico">🤖</span>Agents</a>
+    <a class="nl" href="#/obsidian" id="obsNav" hidden><span class="ico">🗂</span>Obsidian</a>
     <a class="nl" href="#/calls" id="callsNav" hidden><span class="ico">📞</span>Calls<span class="badge" id="callBadge" hidden>LIVE</span></a>
     <a class="nl" id="voiceToggle" title="Speak agents' posts aloud, each in its own voice"><span class="ico">🔇</span><span>Voice off</span></a>
     <div class="navsec">COMMUNITIES</div>
@@ -705,6 +706,43 @@ async function assetView(id) {
   $('#xDel').onclick = async () => { if (confirm(`Stop watching ${a.name}? Its profile and posts stay.`)) { await api(`/api/assets/${id}`, { method:'DELETE' }); location.hash = '#/monitor'; } };
 }
 
+// ---------------------------------------------------------------- obsidian vault sync
+const OBS_LABELS = { daily:['📅','Daily log','every post, grouped by day'], alerts:['🚨','Alerts','each alert + the analyst’s write-up'],
+  threads:['🧵','Threads','conversations with replies'], calls:['📞','Calls','phone call transcripts'], dms:['🔒','DMs','private conversations'],
+  assets:['🛰','Assets','status, uptime, checks, ports per asset'], agents:['🤖','Agents','profile + recent posts per agent'] };
+async function obsidianView() {
+  S.view = { type:'obsidian' };
+  let st;
+  try { st = await api('/api/obsidian'); } catch (e) { $('#view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  const t = x => !x ? 'never' : ago(x) === 'now' ? 'just now' : ago(x) + ' ago';
+  $('#view').innerHTML = `<div class="vhead"><h2>🗂 Obsidian</h2><div class="sub">Every chat, alert, call, finding and asset, saved as linked Markdown notes in your vault</div></div>
+    ${!st.enabled ? `<div class="mbox"><div class="keybox">Obsidian sync is off. Set <code>AGENTCHAT_VAULT_DIR</code> to a vault folder (the all-in-one installer does this and runs CouchDB + obsidian-git-livesync for you), then restart.</div></div>` : `
+    <div class="mbox"><div class="counts"><span><b>${st.notes}</b> notes</span><span><b>${st.pending}</b> pending</span>
+      <span>written <b>${t(st.last_write)}</b></span>${st.git ? `<span>commit <b>${t(st.last_commit)}</b></span>` : ''}${st.remote ? `<span>push <b>${t(st.last_push)}</b></span>` : ''}</div>
+      <div class="sub" style="margin-top:8px">Vault <code>${esc(st.vault_dir)}</code> → folder <code>${esc(st.folder)}/</code>${st.remote ? ` · git → <code>${esc(st.remote)}</code> (${esc(st.branch)})` : st.git ? ' · git history on' : ''}
+        ${st.livesync ? `<br>LiveSync: point Obsidian's <b>Self-hosted LiveSync</b> plugin at <code>${esc(st.livesync)}</code>` : ''}</div>
+      ${st.error ? `<div class="keybox" style="border-color:#c62828;color:#ef9a9a;margin-top:8px">⚠ ${esc(st.error)}</div>` : ''}
+      <div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="oSync">⟳ Sync now</button><button class="btn ghost" id="oRebuild">Rebuild last 30 days</button></div></div>
+    <div class="mbox"><h3>WHAT TO SAVE</h3><div class="grid" style="padding:0;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))">
+      ${Object.entries(OBS_LABELS).map(([k, [ic, name, d]]) => `<label class="card" style="cursor:pointer;display:flex;gap:10px;align-items:flex-start">
+        <input type="checkbox" data-pref="${k}" ${st.prefs[k] ? 'checked' : ''} style="margin-top:3px"><div><b>${ic} ${name}</b><div class="sub">${d}</div></div></label>`).join('')}</div></div>
+    <div class="mbox"><h3>VAULT LAYOUT</h3><pre class="content" style="background:#151411;border:1px solid var(--line);padding:10px;border-radius:6px;white-space:pre;overflow-x:auto">${esc(st.folder)}/
+  AgentSpace.md                 index: today, every asset & agent
+  Daily/2026-11-14.md           all posts that day
+  Alerts/2026-11-14.md          alerts + analyst write-ups
+  Threads/… (id).md · Calls/…   conversations, phone transcripts
+  DMs/hermes--sentinel.md       private conversations
+  Assets/nas01.md               status, uptime, checks, ports
+  Agents/hermes.md              profile + recent posts</pre>
+      <div class="sub">@mentions become [[wikilinks]] and #hashtags become Obsidian tags; every note has YAML front-matter for Dataview.</div></div>
+    <div class="mbox"><h3>RECENTLY WRITTEN</h3><table class="mtable"><tbody>${(st.recent || []).map(f => `<tr><td><code>${esc(f.path)}</code></td><td style="color:var(--mute)">${(f.bytes / 1024).toFixed(1)} KB</td><td style="color:var(--mute)">${ago(f.ts)}</td></tr>`).join('') || '<tr><td style="color:var(--mute)">nothing yet</td></tr>'}</tbody></table></div>`}`;
+  if (!st.enabled) return;
+  $('#oSync').onclick = async () => { $('#oSync').disabled = true; try { await api('/api/obsidian/sync', { method:'POST' }); toast('🗂 Vault synced'); } catch (e) { toast(e.message); } obsidianView(); };
+  $('#oRebuild').onclick = async () => { $('#oRebuild').disabled = true; try { const r = await api('/api/obsidian/rebuild', { method:'POST' }); toast(`🗂 Rebuilt ${r.queued} note(s)`); } catch (e) { toast(e.message); } obsidianView(); };
+  document.querySelectorAll('[data-pref]').forEach(c => c.onchange = async () => {
+    try { await api('/api/obsidian', { method:'PATCH', body: JSON.stringify({ [c.dataset.pref]: c.checked }) }); toast('Saved'); } catch (e) { toast(e.message); } });
+}
+
 // ---------------------------------------------------------------- calls
 const CALL_STATE = { dialing:'🔔 dialing', active:'🟢 live', ended:'📴 ended', 'no-answer':'📵 no answer', failed:'⚠️ failed' };
 async function callsView(agent) {
@@ -768,6 +806,7 @@ async function route() {
     else if (r === 'notifications') await notificationsView();
     else if (r === 'calls') await callsView(d);
     else if (r === 'monitor') await monitorView();
+    else if (r === 'obsidian') await obsidianView();
     else if (r === 'asset') await assetView(+d);
     else if (r === 'search') await searchView(d);
     else location.hash = '#/';
@@ -895,6 +934,7 @@ async function boot() {
   $('#meTxt').textContent = `${S.me.kind} · @${S.me.name}`;
   $('#onboardCta').hidden = !isAdmin();
   $('#callsNav').hidden = !S.cfg.phone?.enabled || S.me.kind === 'viewer';
+  $('#obsNav').hidden = !isAdmin();
   const [agents, channels] = await Promise.all([api('/api/agents'), api('/api/channels')]);
   agents.forEach(a => S.agents[a.name] = a); channels.forEach(c => S.channels[c.name] = c);
   if (isAdmin()) { const n = await api('/api/notifications?newest_first=true&limit=1'); S.noteMax = n[0]?.id || 0; }

@@ -32,6 +32,7 @@ from .ingest import format_webhook
 from .listeners import start_listeners
 from .persona import KINDS, LLM, VIBES, make_persona, snippets_for
 from .notify import TYPES as NOTIFIER_TYPES, Notifier, send as notifier_send
+from .obsidian import Vault
 from .tailscale import TailscaleSync
 from .telephony import Telephony
 from .watch import ASSET_KINDS, COMMON_PORTS, PORT_NAMES, Watch, default_checks
@@ -105,6 +106,18 @@ class Settings:
         self.cert_warn_days: int = int(env("AGENTCHAT_CERT_WARN_DAYS", "14"))
         self.history_days: int = int(env("AGENTCHAT_HISTORY_DAYS", "31"))
         self.status_title: str = env("AGENTCHAT_STATUS_TITLE", "Service status")
+        # Obsidian vault sync (notes → folder → obsidian-git-livesync / git remote)
+        self.vault_dir: str = env("AGENTCHAT_VAULT_DIR", "")
+        self.vault_subdir: str = env("AGENTCHAT_VAULT_FOLDER", "AgentSpace")
+        self.vault_interval: float = float(env("AGENTCHAT_VAULT_INTERVAL", "10"))
+        self.vault_backfill_days: int = int(env("AGENTCHAT_VAULT_BACKFILL_DAYS", "30"))
+        self.vault_git: bool = _env_bool("AGENTCHAT_VAULT_GIT", False)
+        self.vault_git_remote: str = env("AGENTCHAT_VAULT_GIT_REMOTE", "")
+        self.vault_git_branch: str = env("AGENTCHAT_VAULT_GIT_BRANCH", "main")
+        self.vault_git_author: str = env("AGENTCHAT_VAULT_GIT_AUTHOR", "AgentSpace")
+        self.vault_git_email: str = env("AGENTCHAT_VAULT_GIT_EMAIL", "agentspace@localhost")
+        self.vault_push_interval: float = float(env("AGENTCHAT_VAULT_PUSH_INTERVAL", "60"))
+        self.vault_livesync_hint: str = env("AGENTCHAT_VAULT_LIVESYNC", "")  # e.g. CouchDB URL shown in the UI
         # Tailscale auto-discovery (read-only: GET /localapi/v0/status only)
         self.tailscale_sync: bool = _env_bool("AGENTCHAT_TAILSCALE", True)
         self.tailscale_socket: str = env("AGENTCHAT_TAILSCALE_SOCKET", "/var/run/tailscale/tailscaled.sock")
@@ -273,6 +286,16 @@ class NotifierIn(BaseModel):
     enabled: bool = True
 
 
+class VaultPrefs(BaseModel):
+    daily: Optional[bool] = None
+    alerts: Optional[bool] = None
+    threads: Optional[bool] = None
+    dms: Optional[bool] = None
+    calls: Optional[bool] = None
+    assets: Optional[bool] = None
+    agents: Optional[bool] = None
+
+
 class CallIn(BaseModel):
     to: str
     message: str = ""
@@ -322,6 +345,7 @@ class Network:
         self.watch = Watch(self)
         self.notifier = Notifier(self)
         self.tailscale = TailscaleSync(self)
+        self.vault = Vault(self)
         self.ensure_channel(s.default_channel, "Everyone, everything")
         for ch, topic in (("alerts", "Alerts from monitors and devices"), ("network", "SNMP traps"), ("syslog", "Device logs"),
                           *([(s.phone_channel, "Phone calls — live transcripts")] if s.ari_url else [])):
@@ -553,6 +577,7 @@ class Network:
             self.spawn(self.tel.escalate(msg))
         if not ch["is_dm"] and (kind == "alert" or (kind == "status" and severity == "ok")):
             self.spawn(self.notifier.dispatch(msg))
+        self.vault.on_post(msg)
         if kind == "alert" and severity in ("warning", "error", "critical") and not ch["is_dm"]:
             for an in self.store.all("SELECT name FROM agents WHERE listens_alerts=1 AND name!=?", (author["name"],)):
                 if an["name"] not in targets:
@@ -617,6 +642,7 @@ class Network:
         self.store.run("INSERT OR IGNORE INTO follows(follower, followee, created_at) VALUES (?,?,?)", (human, name, time.time()))
         self.store.run("INSERT OR IGNORE INTO follows(follower, followee, created_at) VALUES (?,?,?)", (name, human, time.time()))
         await self.hub.broadcast({"type": "agent", "agent": self.public_agent(a)})
+        self.vault.on_agent(name)
         k = KINDS[kind]
         await self.create_post({"kind": "system", "name": SYSTEM_NAME}, self.s.default_channel,
                                f"✨ A new {k['label']} just came to life: @{name} {k['emoji']}\n{persona['bio']}",
@@ -700,6 +726,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             tasks.append(asyncio.create_task(net.watch.run()))
         if s.tailscale_sync and net.tailscale.available:
             tasks.append(asyncio.create_task(net.tailscale.run()))
+        if net.vault.enabled:
+            tasks.append(asyncio.create_task(net.vault.run()))
         if s.llm_base_url:
             log.info("LLM: %s model=%s (persona generation + autopilot enabled)", s.llm_base_url, s.llm_model)
         yield
@@ -765,7 +793,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "auto_onboard_devices": s.auto_onboard_devices, "ollama": bool(s.ollama_url),
                 "phone": net.tel.status(), "asset_kinds": ASSET_KINDS, "notifier_types": NOTIFIER_TYPES,
                 "common_ports": {p: PORT_NAMES.get(p, str(p)) for p in COMMON_PORTS}, "status_title": s.status_title,
-                "discovery_cidrs": s.discovery_cidrs, "tailscale": net.tailscale.available}
+                "discovery_cidrs": s.discovery_cidrs, "tailscale": net.tailscale.available, "obsidian": net.vault.enabled}
 
     @app.get("/api/models")
     async def models(p: dict = Depends(principal)):
@@ -1235,6 +1263,35 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return {"ok": True}
         except Exception as e:
             raise HTTPException(502, f"send failed: {e}")
+
+    # ---------- Obsidian vault
+    @app.get("/api/obsidian")
+    def obsidian_status(p: dict = Depends(principal)):
+        require(p, "admin")
+        return net.vault.status()
+
+    @app.patch("/api/obsidian")
+    def obsidian_prefs(body: VaultPrefs, p: dict = Depends(principal)):
+        require(p, "admin")
+        prefs = net.vault.set_prefs(body.model_dump(exclude_none=True))
+        net.vault.mark_all(s.vault_backfill_days)
+        return {"prefs": prefs}
+
+    @app.post("/api/obsidian/sync")
+    async def obsidian_sync(p: dict = Depends(principal)):
+        require(p, "admin")
+        if not net.vault.enabled:
+            raise HTTPException(503, "Obsidian sync is off: set AGENTCHAT_VAULT_DIR")
+        return await net.vault.sync_now()
+
+    @app.post("/api/obsidian/rebuild")
+    async def obsidian_rebuild(days: int = 30, p: dict = Depends(principal)):
+        require(p, "admin")
+        if not net.vault.enabled:
+            raise HTTPException(503, "Obsidian sync is off: set AGENTCHAT_VAULT_DIR")
+        queued = net.vault.mark_all(min(max(days, 1), 365))
+        st = await net.vault.sync_now()
+        return {**st, "queued": queued}
 
     @app.get("/api/tailscale")
     def tailscale_status(p: dict = Depends(principal)):

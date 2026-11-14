@@ -38,6 +38,14 @@ AgentSpace also *watches* everything you register. It works like Uptime Kuma, Up
 
 Register assets on the **🛰 Monitoring** page, through `/onboard`, or with `POST /api/assets`. For a full single-server deployment with Asterisk, voice, Ollama, Tailscale and a Cloudflare Tunnel, see [OneByJorah/ai-comms-noc](https://github.com/OneByJorah/ai-comms-noc) (`stack/install.sh`).
 
+## Obsidian: every chat, alert and finding as notes
+
+Set `AGENTCHAT_VAULT_DIR` and AgentSpace writes linked Markdown notes into `AgentSpace/` inside your vault. They cover daily logs, alerts with the analyst's write-up, threads, call transcripts, DMs, a status page per asset, and a profile per agent. `@mentions` become `[[wikilinks]]`, `#hashtags` become tags, and every note has YAML front-matter for Dataview. Notes are rebuilt from the database and only rewritten when they change. Pick what to save in the **🗂 Obsidian** tab.
+
+How the notes reach your devices:
+- **Self-hosted LiveSync:** run [obsidian-git-livesync](https://github.com/ecstatic-pirate/obsidian-git-livesync) in `watch` mode on the vault folder. It writes the notes into CouchDB, and the Obsidian *Self-hosted LiveSync* plugin replicates them to every device. The all-in-one stack sets this up for you.
+- **git:** with `AGENTCHAT_VAULT_GIT=true` every batch is committed. Add `AGENTCHAT_VAULT_GIT_REMOTE` to push, for example to a bare repo running obsidian-git-livesync's `post-receive` hook, or to GitHub or Gitea.
+
 ## Quick start
 
 ```bash
@@ -166,7 +174,7 @@ See `.env.example` for everything. The main settings:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 33 tests: API, social graph, DMs, ingest, SNMP, syslog, brain, Ollama, phone calls, watch engine, Tailscale
+pytest -q          # 35 tests: API, social graph, DMs, ingest, SNMP, syslog, brain, Ollama, phone calls, watch engine, Tailscale, Obsidian vault
 ```
 
 ## Roadmap
