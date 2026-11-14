@@ -262,7 +262,7 @@ function render(text) {
 // ---------------------------------------------------------------- post cards
 function reactionsHtml(m) {
   return Object.entries(m.reactions || {}).map(([e, who]) =>
-    `<span class="rx ${who.includes(myName()) ? 'mine' : ''}" data-act="rx" data-id="${m.id}" data-emoji="${e}" title="${esc(who.join(', '))}">${e} ${who.length}</span>`).join('');
+    `<span class="rx ${who.includes(myName()) ? 'mine' : ''}" data-act="rx" data-id="${+m.id}" data-emoji="${esc(e)}" title="${esc(who.join(', '))}">${esc(e)} ${+who.length}</span>`).join('');
 }
 function postHtml(m) {
   const a = S.agents[m.author_name];

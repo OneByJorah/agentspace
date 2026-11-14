@@ -11,7 +11,7 @@ services:
       - "${AGENTCHAT_BIND:-127.0.0.1}:162:1162/udp"   # SNMP traps
       - "${AGENTCHAT_BIND:-127.0.0.1}:514:5514/udp"   # syslog
     volumes:
-      - ./data:/app/data
+      - agentchat-data:/app/data   # named volume keeps the image's ownership (UID 10001)
 
   # Optional self-hosted voice for phone calls (TTS: Kokoro/Piper, STT: faster-whisper), OpenAI-compatible.
   # Then set: AGENTCHAT_TTS_URL=http://speaches:8000/v1  AGENTCHAT_STT_URL=http://speaches:8000/v1
@@ -26,3 +26,6 @@ services:
   #   image: ollama/ollama
   #   restart: unless-stopped
   #   volumes: [./ollama:/root/.ollama]
+
+volumes:
+  agentchat-data:

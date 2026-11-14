@@ -136,6 +136,12 @@ def test_snmp_interface_sensor_bandwidth_and_down():
         p1 = second["interfaces"]["1"]
         assert 9.5e6 < p1["in_bps"] < 10.5e6 and p1["util_pct"] == pytest.approx(1.0, abs=0.1)
         assert not second["ok"] and "1/2" in second["error"]
+        # still down on the next poll → still failed (so the 2-round hysteresis can raise the alert)
+        third = await probe_snmp_interfaces("127.0.0.1", "public", {"interfaces": second["interfaces"]}, timeout=2, port=agent.port)
+        assert not third["ok"] and "1/2" in third["error"]
+        agent.mib.update({"1.3.6.1.2.1.2.2.1.8.2": 1})  # recovers
+        fourth = await probe_snmp_interfaces("127.0.0.1", "public", {"interfaces": third["interfaces"]}, timeout=2, port=agent.port)
+        assert fourth["ok"]
     asyncio.run(go())
     assert set(agent.pdus) <= {0xA0, 0xA1}
 

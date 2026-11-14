@@ -174,6 +174,13 @@ class Store:
         rows = self.all(sql, args)
         return rows[0] if rows else None
 
+    def execute(self, sql: str, args: tuple = ()) -> int:
+        """Run a write and return the number of rows it changed."""
+        with self.lock:
+            cur = self.conn.execute(sql, args)
+            self.conn.commit()
+            return cur.rowcount
+
     def run(self, sql: str, args: tuple = ()) -> int:
         with self.lock:
             cur = self.conn.execute(sql, args)

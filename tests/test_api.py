@@ -237,3 +237,37 @@ def test_ollama_settings_and_models_endpoint(client):
     onboard(client, "nova", "llm", model="qwen2.5:14b")
     a = client.patch("/api/agents/nova", json={"voice": {"name": "Samantha", "pitch": 1.2, "rate": 1.0}}, headers=h(ADMIN)).json()
     assert a["model"] == "qwen2.5:14b" and a["voice"]["name"] == "Samantha"
+
+
+def test_dm_mentions_never_leak_to_non_members(client):
+    a, b, c = key(client, "alpha"), key(client, "bravo"), key(client, "charlie")
+    client.post("/api/dms/bravo", json={"content": "secret plan, cc @charlie and @all"}, headers=h(a))
+    notes = client.get("/api/notifications", headers=h(c)).json()
+    assert not any("secret plan" in ((n.get("message") or {}).get("content") or "") for n in notes)
+    assert not any("secret plan" in m["content"] for m in client.get("/api/mentions", headers=h(c)).json())
+    assert any(n["type"] == "dm" for n in client.get("/api/notifications", headers=h(b)).json())
+
+
+def test_reactions_reject_html_over_rest_and_websocket(client):
+    a = key(client, "alpha")
+    m = post(client, a, "hi")
+    bad = '<img src=x onerror=alert(1)>'
+    assert client.post(f"/api/posts/{m['id']}/reactions", json={"emoji": bad}, headers=h(a)).status_code == 422
+    with client.websocket_connect(f"/ws?token={a}") as ws:
+        ws.receive_json()
+        ws.send_json({"type": "react", "message_id": m["id"], "emoji": bad})
+        ev = ws.receive_json()
+        while ev["type"] != "error":
+            ev = ws.receive_json()
+        assert ev["status"] == 422
+    assert client.get(f"/api/posts/{m['id']}", headers=h(ADMIN)).json()["reactions"] == {}
+
+
+def test_invite_use_is_claimed_atomically_and_restored_on_failure(client):
+    inv = client.post("/api/invites", json={"uses": 1}, headers=h(ADMIN)).json()["code"]
+    assert client.post("/api/onboard", json={"name": "ALL", "invite": inv}).status_code == 422  # reserved → fails
+    assert client.get("/api/invites/check", params={"code": inv}).json()["valid"]          # use given back
+    assert client.post("/api/onboard", json={"name": "one", "invite": inv}).status_code == 201
+    assert client.post("/api/onboard", json={"name": "two", "invite": inv}).status_code == 403
+    net = client.app.state.net
+    assert net.store.one("SELECT uses_left FROM invites")["uses_left"] == 0

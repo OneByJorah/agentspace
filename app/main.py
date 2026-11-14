@@ -557,8 +557,8 @@ class Network:
         targets.update({t: "mention" for t in tokens if t in names})
         if parent and parent["author_name"] in names:
             targets[parent["author_name"]] = "reply"
-        if ch["is_dm"]:
-            targets.update({m: "dm" for m in members})
+        if ch["is_dm"]:  # private: only the conversation's members are ever notified, whatever is @mentioned
+            targets = {m: "dm" for m in members}
         targets.pop(author["name"], None)
 
         mid = self.store.run(
@@ -585,6 +585,9 @@ class Network:
         return msg
 
     async def react(self, actor: str, mid: int, emoji: str, on: bool = True) -> dict:
+        emoji = str(emoji or "").strip()
+        if not emoji or len(emoji) > 16 or re.search(r"[<>&\"'`\\]", emoji):
+            raise HTTPException(422, "reaction must be a short emoji")
         msg = self.store.one("SELECT id, author_name FROM messages WHERE id=?", (mid,))
         if not msg:
             raise HTTPException(404, "message not found")
@@ -922,16 +925,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if token and secrets.compare_digest(token, s.admin_token):
             by = s.human_name
         elif body.invite:
-            inv = store.one("SELECT * FROM invites WHERE code_hash=?", (_hash(body.invite),))
-            if not inv or inv["uses_left"] <= 0 or inv["expires_at"] < time.time():
+            # claim one use atomically BEFORE the (slow) persona generation, so concurrent requests can't share it
+            claimed = store.execute("UPDATE invites SET uses_left=uses_left-1 WHERE code_hash=? AND uses_left>0 AND expires_at>?",
+                                    (_hash(body.invite), time.time()))
+            if not claimed:
                 raise HTTPException(403, "invite is invalid, used up, or expired")
-            by = f"invite:{inv['id']}"
+            by = "invite:" + str(store.one("SELECT id FROM invites WHERE code_hash=?", (_hash(body.invite),))["id"])
         else:
             raise HTTPException(401, "admin token or invite required")
-        res = await net.onboard(body, base_url(request), by)
-        if by.startswith("invite:"):
-            store.run("UPDATE invites SET uses_left=uses_left-1 WHERE id=?", (int(by.split(":")[1]),))
-        return res
+        try:
+            return await net.onboard(body, base_url(request), by)
+        except Exception:
+            if by.startswith("invite:"):  # give the use back if onboarding failed
+                store.run("UPDATE invites SET uses_left=uses_left+1 WHERE id=?", (int(by.split(":")[1]),))
+            raise
 
     @app.post("/api/invites", status_code=201)
     def create_invite(body: InviteCreate, request: Request, p: dict = Depends(principal)):
@@ -1144,6 +1151,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         aid = store.run("INSERT INTO assets(agent_name, name, kind, target, checks, interval_s, critical, public, created_at)"
                         " VALUES (?,?,?,?,?,?,?,?,?)", (name, body.display_name or name, kind, body.target, json.dumps(checks),
                                                         max(15, body.interval_s), int(body.critical), int(body.public), time.time()))
+        net.vault.on_asset(aid)  # the note exists from registration on, not only after the first check finishes
         net.watch.running.add(aid)
         net.spawn(net.watch.check_asset(aid))
         out = {"asset": net.watch.public(store.one("SELECT * FROM assets WHERE id=?", (aid,))),

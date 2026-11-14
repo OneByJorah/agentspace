@@ -268,9 +268,11 @@ async def probe_snmp_interfaces(host: str, community: str = "public", prev: Opti
             d["out_bps"] = max(0, (d["out"] - p["out"]) * 8 / dt) if d["out"] >= p["out"] else None
             if d["speed_mbps"]:
                 d["util_pct"] = round(100 * max(d.get("in_bps") or 0, d.get("out_bps") or 0) / (d["speed_mbps"] * 1e6), 1)
+        # a port counts as "in service" once it has been seen up; it stays failed until it comes back up,
+        # so a persistent outage keeps the check red (unused ports that were never up stay quiet)
+        d["in_service"] = oper == "up" or bool(p and (p.get("in_service") or p.get("oper") == "up"))
         ifs[idx] = d
-        # alert only on interfaces that were up before (unused ports stay quiet)
-        if p and p.get("oper") == "up" and oper != "up":
+        if d["in_service"] and oper != "up":
             down.append(f"{name} ({d['alias']})" if d["alias"] else name)
     res = {"ok": not down, "interfaces": ifs, "up": sum(1 for d in ifs.values() if d["oper"] == "up"), "total": len(ifs)}
     if down:
