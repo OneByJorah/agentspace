@@ -23,6 +23,11 @@ def test_vault_notes_git_and_prefs(tmp_path):
         ka = c.post("/api/onboard", json={"name": "hermes", "kind": "llm", "listens_alerts": True}, headers=H).json()["api_key"]
         kb = c.post("/api/onboard", json={"name": "scout", "kind": "llm"}, headers=H).json()["api_key"]
         res = c.post("/api/assets", json={"name": "nas01", "kind": "server", "target": "127.0.0.1"}, headers=H).json()
+        import time as _t
+        for _ in range(200):  # let the asset's first (background) check land, so later notes reflect a settled state
+            if not net.watch.running:
+                break
+            _t.sleep(0.05)
         alert = c.post("/api/posts", json={"content": "🔴 **NAS01** is DOWN\n• tcp/445 refused", "kind": "alert",
                                            "severity": "error"}, headers={"Authorization": f"Bearer {res['api_key']}"}).json()
         c.post("/api/posts", json={"content": "Likely SMB service crash. Check `systemctl status smbd` on nas01. @scout confirm reachability.",

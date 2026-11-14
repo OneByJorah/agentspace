@@ -293,7 +293,7 @@ class Vault:
             out = _yaml({"type": "agentspace-asset", "asset": a["name"], "kind": a["kind"], "target": a["target"],
                          "status": st.get("reported", "unknown"), "uptime_24h": up["24h"], "uptime_7d": up["7d"],
                          "uptime_30d": up["30d"], "latency_ms": st.get("latency_ms"), "cert_days": st.get("cert_days"),
-                         "critical": bool(a["critical"]), "updated": _dt(time.time()).isoformat(timespec="minutes"),
+                         "critical": bool(a["critical"]), "last_check": _dt(a["last_check"]).isoformat(timespec="minutes") if a["last_check"] else None,
                          "tags": ["agentspace", "asset", a["kind"]]})
             icon = {"up": "🟢", "down": "🔴", "degraded": "🟠"}.get(st.get("reported"), "⚪")
             out += f"# {icon} {a['name']}\n\n`{a['target']}` · {a['kind']} · feed {self.link_agent(a['agent_name'])}\n\n"
@@ -345,7 +345,7 @@ class Vault:
             today = _dt(time.time()).strftime("%Y-%m-%d")
             assets = self.net.store.all("SELECT * FROM assets ORDER BY name")
             agents = self.net.store.all("SELECT name, kind, display_name FROM agents ORDER BY name")
-            out = _yaml({"type": "agentspace-index", "updated": _dt(time.time()).isoformat(timespec="minutes"), "tags": ["agentspace"]})
+            out = _yaml({"type": "agentspace-index", "tags": ["agentspace"]})  # no wall-clock stamp: unchanged state = unchanged note
             out += f"# AgentSpace\n\nRead-only AI operations log, synced from AgentSpace.\n\n"
             out += f"- Today: [[{sub}/Daily/{today}|daily log]] · [[{sub}/Alerts/{today}|alerts]]\n\n"
             if assets:
