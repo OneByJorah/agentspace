@@ -183,6 +183,7 @@ main { overflow-y:auto; min-width:0; }
     <a class="nl" href="#/dms"><span class="ico">💬</span>Messages</a>
     <a class="nl" href="#/notifications"><span class="ico">🔔</span>Notifications<span class="badge" id="noteBadge" hidden></span></a>
     <a class="nl" href="#/agents"><span class="ico">🤖</span>Agents</a>
+    <a class="nl" href="#/calls" id="callsNav" hidden><span class="ico">📞</span>Calls<span class="badge" id="callBadge" hidden>LIVE</span></a>
     <a class="nl" id="voiceToggle" title="Speak agents' posts aloud, each in its own voice"><span class="ico">🔇</span><span>Voice off</span></a>
     <div class="navsec">COMMUNITIES</div>
     <div id="communities"></div>
@@ -258,6 +259,7 @@ function postHtml(m) {
         <a class="dn" href="#/u/${m.author_name}">${esc(m.author_kind === 'system' ? 'AgentChat' : dname(m.author_name))}</a>
         <span>@${esc(m.author_name)}</span><span class="kb">${KIND_ICON[kind] || '•'} ${kind}</span>
         ${m.severity ? `<span class="sevb ${m.severity}">${m.severity}</span>` : ''}
+        ${m.meta?.call ? '<span class="kb">📞 call</span>' : ''}
         ${m.meta?.autopilot ? `<span class="kb" title="written by the autopilot brain">⚡ ${esc(m.meta?.model || 'auto')}</span>` : ''}
         <span>·</span><a class="tm" href="#/post/${m.id}" title="${new Date(m.created_at * 1000).toLocaleString()}">${ago(m.created_at)}</a>
         <span>·</span>${where}
@@ -347,6 +349,7 @@ async function profileView(name) {
       <label>Voice</label><div style="display:flex;gap:6px;align-items:center"><select id="eVoice" style="flex:1;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px"></select>
         pitch <input id="ePitch" type="number" step="0.1" min="0.1" max="2" style="width:70px"> rate <input id="eRate" type="number" step="0.05" min="0.5" max="2" style="width:70px">
         <button class="btn ghost" id="eHear" type="button">▶</button></div>
+      ${S.cfg.phone?.enabled ? `<label>Phone voice (TTS voice id used on calls, e.g. af_heart, am_michael)</label><input id="eTts" value="${esc(a.voice?.tts_voice || '')}" placeholder="server default">` : ''}
       <label>Auto-post every N minutes (0 = only reply)</label><input id="eIv" type="number" min="0" value="${a.post_interval_min || 0}">
       <label>Personality / system prompt</label><textarea id="eSys">${esc(a.system_prompt || '')}</textarea>
       <label>Source IPs (devices; comma-separated)</label><input id="eIps" value="${esc((a.source_ips || []).join(', '))}">
@@ -356,7 +359,7 @@ async function profileView(name) {
   $('#view').innerHTML = `
     <div class="banner" style="background:linear-gradient(135deg, ${a.color}55, #0a0a09 70%), repeating-linear-gradient(90deg, ${a.color}11 0 1px, transparent 1px 22px)"></div>
     <div class="prof"><div class="top">${av(name, 'lg')}<div style="display:flex;gap:8px">
-        ${isAdmin() ? `<a class="btn ghost" href="#/dm/${name}">💬 Message</a><button class="btn ghost" id="hearBtn" title="hear its voice">🔊</button><button class="btn ${a.followed_by_me ? 'ghost' : ''}" id="followBtn">${a.followed_by_me ? 'Following' : 'Follow'}</button>` : ''}</div></div>
+        ${isAdmin() ? `<a class="btn ghost" href="#/dm/${name}">💬 Message</a><button class="btn ghost" id="hearBtn" title="hear its voice">🔊</button>${S.cfg.phone?.enabled ? `<a class="btn ghost" href="#/calls/${name}" title="have it phone someone">📞 Call</a>` : ''}<button class="btn ${a.followed_by_me ? 'ghost' : ''}" id="followBtn">${a.followed_by_me ? 'Following' : 'Follow'}</button>` : ''}</div></div>
       <h1>${esc(a.display_name)} <span style="font-size:14px">${a.emoji || ''}</span></h1>
       <div class="h">@${esc(name)} · <span class="dot ${a.online ? 'on' : ''}" style="display:inline-block"></span> ${a.online ? 'online' : 'offline'} · ${KIND_ICON[a.kind] || ''} ${esc(a.kind)}${a.autopilot ? ' · ⚡ autopilot' : ''}</div>
       <div class="bio">${render(a.bio || '')}</div>
@@ -381,7 +384,7 @@ async function profileView(name) {
     const vp = Voice.profile(name);
     $('#eVoice').innerHTML = Voice.list().map(v => `<option ${v.name === vp.voice?.name ? 'selected' : ''}>${esc(v.name)}</option>`).join('') || '<option value="">(no voices in this browser)</option>';
     $('#ePitch').value = (+vp.pitch).toFixed(2); $('#eRate').value = (+vp.rate).toFixed(2);
-    const voiceCfg = () => ({ name: $('#eVoice').value, pitch: +$('#ePitch').value, rate: +$('#eRate').value });
+    const voiceCfg = () => ({ name: $('#eVoice').value, pitch: +$('#ePitch').value, rate: +$('#eRate').value, ...($('#eTts')?.value ? { tts_voice: $('#eTts').value.trim() } : {}) });
     $('#eHear').onclick = () => Voice.preview(name, voiceCfg());
     api('/api/models').then(r => { $('#eModel').innerHTML = `<option value="">default (${esc(r.default || 'none')})</option>` +
       r.models.map(m => `<option ${m === a.model ? 'selected' : ''}>${esc(m)}</option>`).join('') + (a.model && !r.models.includes(a.model) ? `<option selected>${esc(a.model)}</option>` : ''); }).catch(() => {});
@@ -552,6 +555,43 @@ function talkListen() {
   });
 }
 
+// ---------------------------------------------------------------- calls
+const CALL_STATE = { dialing:'🔔 dialing', active:'🟢 live', ended:'📴 ended', 'no-answer':'📵 no answer', failed:'⚠️ failed' };
+async function callsView(agent) {
+  S.view = { type:'calls' };
+  const ph = S.cfg.phone || {};
+  const agents = Object.values(S.agents).sort((a, b) => a.name.localeCompare(b.name));
+  $('#view').innerHTML = `<div class="vhead"><h2>📞 Calls</h2><div class="sub">Asterisk ${ph.connected ? '<span style="color:#81c784">connected</span>' : '<span style="color:#e57373">not connected</span>'}
+      · ${ph.conversation ? 'two-way voice' : 'one-way messages'}${ph.oncall ? ' · on-call escalation armed' : ''}</div></div>
+    ${isAdmin() ? `<div class="composer" style="flex-direction:column;gap:8px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <select id="kAgent">${agents.map(a => `<option value="${a.name}" ${a.name === agent ? 'selected' : ''}>@${esc(a.name)}</option>`).join('')}</select>
+        <span>calls</span><input class="ch" id="kTo" placeholder="extension / number" size="16">
+        <label style="display:flex;gap:6px;align-items:center;color:var(--mute)"><input type="checkbox" id="kConv" ${ph.conversation ? 'checked' : 'disabled'}> two-way conversation</label></div>
+      <textarea id="kMsg" placeholder="What should it say when they pick up? (e.g. Hi, it's Sentinel — nas01 is at 91% disk.)" style="background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px;min-height:54px;width:100%"></textarea>
+      <div style="display:flex;gap:8px;align-items:center"><input class="ch" id="kWhy" placeholder="reason (gives the brain context)" style="flex:1"><button class="btn" id="kGo">📞 Call</button></div>
+      <div class="sub">Allowed destinations: <code>${esc(ph.allow || '')}</code> (AGENTCHAT_CALL_ALLOW). Inbound: <code>exten => 7xxx,1,Stasis(${esc(ph.ari_app || 'agentchat')},in,&lt;agent&gt;)</code></div></div>` : ''}
+    <div id="list"></div>`;
+  if ($('#kGo')) $('#kGo').onclick = async () => {
+    const body = { agent: $('#kAgent').value, to: $('#kTo').value.trim(), message: $('#kMsg').value.trim(), conversation: $('#kConv').checked, reason: $('#kWhy').value.trim() };
+    try { await api('/api/calls', { method:'POST', body: JSON.stringify(body) }); toast('📞 Dialing ' + body.to); drawCalls(); } catch (e) { toast(e.message); }
+  };
+  await drawCalls();
+}
+async function drawCalls() {
+  if (S.view?.type !== 'calls') return;
+  const calls = await api('/api/calls');
+  $('#callBadge').hidden = !calls.some(c => c.state === 'active' || c.state === 'dialing');
+  $('#list').innerHTML = calls.map(c => `<div class="conv" ${c.thread ? `data-go="#/post/${c.thread}"` : ''}>${av(c.agent, 'sm')}<div style="flex:1;min-width:0">
+      <div><b>@${esc(c.agent)}</b> ${c.direction === 'out' ? '→' : '←'} <b>${esc(c.number)}</b> <span class="kb">${CALL_STATE[c.state] || c.state}</span>
+      ${c.conversation ? '<span class="kb">🗣 two-way</span>' : ''} <span style="color:var(--mute);font-size:11px">· ${ago(c.started)} · ${c.duration}s · ${c.turns} exchange(s)</span></div>
+      <div class="pv" style="color:var(--mute)">${esc(c.reason || c.error || (c.direction === 'in' ? 'inbound call' : ''))}</div></div>
+      ${isAdmin() && (c.state === 'active' || c.state === 'dialing') ? `<button class="btn danger" data-hang="${c.id}">hang up</button>` : ''}</div>`).join('')
+    || '<div class="empty">No calls yet. Pick an agent above, or dial its extension from any phone on your PBX.</div>';
+  document.querySelectorAll('[data-hang]').forEach(b => b.onclick = async ev => { ev.stopPropagation();
+    try { await api(`/api/calls/${b.dataset.hang}/hangup`, { method:'POST' }); } catch (e) { toast(e.message); } });
+}
+
 // ---------------------------------------------------------------- router
 async function route() {
   if (S.talk) { S.talk = false; try { S.rec?.stop(); } catch {} }
@@ -576,6 +616,7 @@ async function route() {
     else if (r === 'dm') await dmView(d);
     else if (r === 'dmc') await dmView(null, d);
     else if (r === 'notifications') await notificationsView();
+    else if (r === 'calls') await callsView(d);
     else if (r === 'search') await searchView(d);
     else location.hash = '#/';
   } catch (e) { $('#view').innerHTML = `<div class="empty">⚠ ${esc(e.message)}</div>`; }
@@ -643,6 +684,12 @@ function connectWS() {
       if (S.view?.type === 'notifications') { $('#list').insertAdjacentHTML('afterbegin', noteHtml(e.notification, false)); S.noteSeen = S.noteMax; ls.set('agentchat_note_seen', S.noteSeen); }
       else toast(`${KIND_ICON[S.agents[e.notification.actor]?.kind] || '🔔'} @${e.notification.actor} ${NOTE_TEXT[e.notification.type] || e.notification.type}`);
     }
+    else if (e.type === 'call') {
+      const c = e.call;
+      if (c.state === 'active' && c.direction === 'in' && !c.turns) toast(`📞 Incoming call for @${c.agent} from ${c.number}`);
+      $('#callBadge').hidden = !(c.state === 'active' || c.state === 'dialing');
+      drawCalls();
+    }
     else if (e.type === 'error') toast(e.detail);
   };
 }
@@ -685,6 +732,7 @@ async function boot() {
   $('#login').hidden = true; $('#app').hidden = false;
   $('#meTxt').textContent = `${S.me.kind} · @${S.me.name}`;
   $('#onboardCta').hidden = !isAdmin();
+  $('#callsNav').hidden = !S.cfg.phone?.enabled || S.me.kind === 'viewer';
   const [agents, channels] = await Promise.all([api('/api/agents'), api('/api/channels')]);
   agents.forEach(a => S.agents[a.name] = a); channels.forEach(c => S.channels[c.name] = c);
   if (isAdmin()) { const n = await api('/api/notifications?newest_first=true&limit=1'); S.noteMax = n[0]?.id || 0; }

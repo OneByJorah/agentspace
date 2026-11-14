@@ -31,6 +31,7 @@ from .db import MSG_SQL, Store
 from .ingest import format_webhook
 from .listeners import start_listeners
 from .persona import KINDS, LLM, VIBES, make_persona, snippets_for
+from .telephony import Telephony
 
 log = logging.getLogger("agentchat")
 logging.basicConfig(level=os.getenv("AGENTCHAT_LOG_LEVEL", "INFO"))
@@ -90,6 +91,33 @@ class Settings:
         self.snmp_communities: set[str] = {c for c in env("AGENTCHAT_SNMP_COMMUNITIES", "").split(",") if c}
         self.syslog_min_severity: int = int(env("AGENTCHAT_SYSLOG_MIN_SEVERITY", "5"))
         self.auto_onboard_devices: bool = _env_bool("AGENTCHAT_AUTO_ONBOARD_DEVICES", True)
+        # Telephony — Asterisk ARI + self-hosted speech (OpenAI-compatible TTS/STT)
+        self.ari_url: str = env("AGENTCHAT_ARI_URL", "")            # e.g. http://pbx.tailnet:8088/ari
+        self.ari_user: str = env("AGENTCHAT_ARI_USER", "agentchat")
+        self.ari_password: str = env("AGENTCHAT_ARI_PASSWORD", "")
+        self.ari_app: str = env("AGENTCHAT_ARI_APP", "agentchat")
+        self.dial_template: str = env("AGENTCHAT_DIAL_TEMPLATE", "PJSIP/{to}")   # trunk: PJSIP/{to}@my-trunk
+        self.caller_id: str = env("AGENTCHAT_CALLER_ID", "")
+        self.caller_id_number: str = env("AGENTCHAT_CALLER_ID_NUMBER", "7000")
+        self.call_allow: str = env("AGENTCHAT_CALL_ALLOW", r"\d{2,6}")   # internal extensions only by default
+        self.calls_per_hour: int = int(env("AGENTCHAT_CALLS_PER_HOUR", "10"))
+        self.call_max_turns: int = int(env("AGENTCHAT_CALL_MAX_TURNS", "8"))
+        self.listen_max_seconds: int = int(env("AGENTCHAT_LISTEN_MAX_SECONDS", "20"))
+        self.listen_silence_seconds: int = int(env("AGENTCHAT_LISTEN_SILENCE_SECONDS", "2"))
+        self.phone_channel: str = env("AGENTCHAT_PHONE_CHANNEL", "calls")
+        self.phone_default_agent: str = env("AGENTCHAT_PHONE_DEFAULT_AGENT", "hermes")
+        self.phone_media_url: str = env("AGENTCHAT_PHONE_MEDIA_URL", "")   # hub URL as Asterisk sees it
+        self.asterisk_sounds_dir: str = env("AGENTCHAT_ASTERISK_SOUNDS_DIR", "")
+        self.asterisk_sounds_prefix: str = env("AGENTCHAT_ASTERISK_SOUNDS_PREFIX", "agentchat")
+        self.tts_url: str = env("AGENTCHAT_TTS_URL", "")
+        self.tts_model: str = env("AGENTCHAT_TTS_MODEL", "kokoro")
+        self.tts_voice: str = env("AGENTCHAT_TTS_VOICE", "af_heart")
+        self.tts_api_key: str = env("AGENTCHAT_TTS_API_KEY", "")
+        self.stt_url: str = env("AGENTCHAT_STT_URL", "")
+        self.stt_model: str = env("AGENTCHAT_STT_MODEL", "Systran/faster-whisper-small")
+        self.stt_api_key: str = env("AGENTCHAT_STT_API_KEY", "")
+        self.oncall_number: str = env("AGENTCHAT_ONCALL_NUMBER", "")
+        self.oncall_cooldown_min: int = int(env("AGENTCHAT_ONCALL_COOLDOWN_MIN", "15"))
         for k, v in overrides.items():
             setattr(self, k, v)
         if self.ollama_url and not self.llm_base_url:  # Ollama speaks the OpenAI API under /v1
@@ -181,6 +209,15 @@ class OnboardIn(BaseModel):
     model: Optional[str] = None
 
 
+class CallIn(BaseModel):
+    to: str
+    message: str = ""
+    conversation: bool = False
+    agent: Optional[str] = None
+    reason: str = ""
+    max_turns: Optional[int] = None
+
+
 class DMIn(BaseModel):
     content: str
     reply_to: Optional[int] = None
@@ -217,8 +254,10 @@ class Network:
         self.bg: set[asyncio.Task] = set()
         self._ip_map: Optional[dict[str, str]] = None
         self.dropped = 0
+        self.tel = Telephony(self)
         self.ensure_channel(s.default_channel, "Everyone, everything")
-        for ch, topic in (("alerts", "Alerts from monitors and devices"), ("network", "SNMP traps"), ("syslog", "Device logs")):
+        for ch, topic in (("alerts", "Alerts from monitors and devices"), ("network", "SNMP traps"), ("syslog", "Device logs"),
+                          *([(s.phone_channel, "Phone calls — live transcripts")] if s.ari_url else [])):
             self.ensure_channel(ch, topic)
 
     def spawn(self, coro) -> None:
@@ -440,6 +479,8 @@ class Network:
                                  None if not ch["is_dm"] else lambda p: p["kind"] == "admin" or p["name"] in members)
         for name, type_ in targets.items():
             await self.notify(name, type_, author["name"], msg)
+        if severity == "critical" and agent and self.s.oncall_number:
+            self.spawn(self.tel.escalate(msg))
         return msg
 
     async def react(self, actor: str, mid: int, emoji: str, on: bool = True) -> dict:
@@ -510,7 +551,8 @@ class Network:
             "api_key": key, "ingest_token": ingest, "ingest_url": f"{base_url}/ingest/{ingest}",
             "persona": persona, "first_post": first, "llm_persona": persona.get("source") == "llm",
             "autopilot_active": bool(d.autopilot and self.llm.configured),
-            "snippets": snippets_for(kind, base_url, name, key, ingest, host, self.s.snmp_public_port, self.s.syslog_public_port),
+            "snippets": snippets_for(kind, base_url, name, key, ingest, host, self.s.snmp_public_port, self.s.syslog_public_port,
+                                     phone=self.tel.status() if self.tel.enabled else None),
             "note": "Store the API key and ingest token now — they are not shown again.",
         }
 
@@ -573,6 +615,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             transports = await start_listeners(net)
         if s.start_brain:
             tasks.append(asyncio.create_task(Brain(net).run()))
+        if net.tel.enabled:
+            tasks.append(asyncio.create_task(net.tel.run()))
         if s.llm_base_url:
             log.info("LLM: %s model=%s (persona generation + autopilot enabled)", s.llm_base_url, s.llm_model)
         yield
@@ -635,7 +679,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "kinds": KINDS, "vibes": {k: v["desc"] for k, v in VIBES.items()},
                 "snmp_port": s.snmp_public_port if s.listeners and s.snmp_port else None,
                 "syslog_port": s.syslog_public_port if s.listeners and s.syslog_port else None,
-                "auto_onboard_devices": s.auto_onboard_devices, "ollama": bool(s.ollama_url)}
+                "auto_onboard_devices": s.auto_onboard_devices, "ollama": bool(s.ollama_url),
+                "phone": net.tel.status()}
 
     @app.get("/api/models")
     async def models(p: dict = Depends(principal)):
@@ -955,6 +1000,52 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "SELECT * FROM agents WHERE name LIKE ? OR display_name LIKE ? OR bio LIKE ? OR tags LIKE ? LIMIT 20",
             (like, like, like, like))]
         return {"agents": agents, "posts": net.query(p, ["(m.content LIKE ? OR m.author_name LIKE ?)"], [like, like], limit=50)}
+
+    # ---------- phone calls (Asterisk ARI)
+    @app.post("/api/calls", status_code=201)
+    async def place_call(body: CallIn, p: dict = Depends(principal)):
+        """Have an agent phone someone. Agents call as themselves; admin picks `agent`."""
+        require(p, "admin", "agent")
+        if p["kind"] == "agent":
+            a = p["agent"]
+        else:
+            a = net.agent(body.agent or "")
+            if not a:
+                raise HTTPException(422, "admin calls need `agent`: which agent is calling")
+        return await net.tel.place_call(a, body.to, body.message, body.conversation, body.max_turns, body.reason, p["name"])
+
+    @app.get("/api/calls")
+    def list_calls(p: dict = Depends(principal)):
+        require(p, "admin", "agent")
+        calls = [c.public() for c in reversed(net.tel.calls.values())]
+        return calls if p["kind"] == "admin" else [c for c in calls if c["agent"] == p["name"]]
+
+    @app.get("/api/calls/{cid}")
+    def get_call(cid: str, p: dict = Depends(principal)):
+        c = net.tel.calls.get(cid)
+        if not c or (p["kind"] != "admin" and c.agent["name"] != p["name"]):
+            raise HTTPException(404, "call not found")
+        return c.public()
+
+    @app.post("/api/calls/{cid}/hangup")
+    async def hangup(cid: str, p: dict = Depends(principal)):
+        c = net.tel.calls.get(cid)
+        if not c or (p["kind"] != "admin" and c.agent["name"] != p["name"]):
+            raise HTTPException(404, "call not found")
+        if c.channel and not c.ended:
+            try:
+                await net.tel.ari("DELETE", f"/channels/{c.channel}")
+            except RuntimeError as e:
+                raise HTTPException(502, str(e))
+        return {"ok": True}
+
+    @app.get("/media/{mid}.wav", include_in_schema=False)
+    def media(mid: str):
+        """Speech audio for Asterisk to fetch (res_http_media_cache). Unguessable ids, short-lived."""
+        data = net.tel.media.get(mid)
+        if data is None:
+            raise HTTPException(404, "gone")
+        return Response(data, media_type="audio/wav", headers={"Cache-Control": "no-store"})
 
     # ---------- universal ingest (webhooks, monitors, scripts)
     @app.post("/ingest/{token}")

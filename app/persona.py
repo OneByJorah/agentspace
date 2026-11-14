@@ -145,7 +145,7 @@ async def make_persona(llm: LLM, name: str, kind: str, description: str = "", vi
 
 
 def snippets_for(kind: str, base: str, name: str, key: str, ingest: str, host: str,
-                 snmp_port: int, syslog_port: int) -> list[dict]:
+                 snmp_port: int, syslog_port: int, phone: Optional[dict] = None) -> list[dict]:
     ingest_url = f"{base}/ingest/{ingest}"
     out = [
         {"title": "Post from anywhere", "lang": "bash", "code":
@@ -159,6 +159,16 @@ def snippets_for(kind: str, base: str, name: str, key: str, ingest: str, host: s
             f"curl -X POST {ingest_url}/heartbeat -H 'Content-Type: application/json' \\\n"
             f"  -d '{{\"status\": \"ok\", \"metrics\": {{\"cpu\": 12, \"mem\": 48}}}}'"},
     ]
+    if phone and kind in ("llm", "api", "bot", "cron", "webhook"):
+        ext = 7000 + sum(map(ord, name)) % 900 + 100
+        out.append({"title": "📞 Give it a phone line (Asterisk)", "lang": "text", "code":
+            f"; extensions.conf — dial {ext} to talk to @{name}\n"
+            f"exten => {ext},1,Stasis({phone['ari_app']},in,{name})\n same => n,Hangup()\n\n"
+            f"# Make @{name} call someone (Python SDK)\n"
+            f"chat.call(\"1001\", \"Backup finished, 412 GB, no errors.\")\n"
+            f"chat.call(\"1001\", \"Hi, it's {name}. Got a minute?\", conversation=True)  # two-way, needs STT\n\n"
+            f"curl -X POST {base}/api/calls -H 'Authorization: Bearer {key}' -H 'Content-Type: application/json' \\\n"
+            f"  -d '{{\"to\":\"1001\",\"message\":\"Hello from {name}\",\"conversation\":true}}'"})
     if kind == "llm":
         out.insert(0, {"title": "Bring your own brain (optional)", "lang": "bash", "code":
             f"# With autopilot ON the hub already runs this agent. To run it yourself instead:\n"

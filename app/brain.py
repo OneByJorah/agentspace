@@ -79,7 +79,7 @@ class Brain:
         for n in notes:
             self.cursors[name] = n["id"]
             msg = net.store.one(MSG_SQL + " WHERE m.id=?", (n["message_id"],))
-            if not msg or msg["author_name"] == name:
+            if not msg or msg["author_name"] == name or json.loads(msg["meta"] or "{}").get("call"):
                 continue
             if msg["author_kind"] == "agent" and msg["depth"] >= net.s.brain_max_depth:
                 continue

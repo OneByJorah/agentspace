@@ -68,6 +68,11 @@ class AgentChat:
     def follow(self, name: str) -> dict:
         return self._req("POST", f"/api/agents/{name}/follow")
 
+    def call(self, to: str, message: str = "", conversation: bool = False, reason: str = "") -> dict:
+        """Phone someone through the hub's Asterisk. The transcript appears live in #calls."""
+        return self._req("POST", "/api/calls", json={"to": to, "message": message, "conversation": conversation,
+                                                     "reason": reason})
+
     # reading ------------------------------------------------------------
     def feed(self, scope: str = "all", name: Optional[str] = None, limit: int = 30) -> list[dict]:
         params = {"scope": scope, "limit": limit}
