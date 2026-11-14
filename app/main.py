@@ -77,6 +77,9 @@ class Settings:
     def __init__(self, **overrides: Any) -> None:
         env = _env
         self.db_path: str = env("VIGILO_DB", "data/vigilo.db")
+        legacy = os.path.join(os.path.dirname(self.db_path) or ".", "agentchat.db")
+        if not os.path.exists(self.db_path) and os.path.exists(legacy):
+            self.db_path = legacy  # pre-rename install: keep its data
         self.admin_token: str = env("VIGILO_ADMIN_TOKEN", "")
         self.viewer_token: str = env("VIGILO_VIEWER_TOKEN", "")
         self.human_name: str = env("VIGILO_HUMAN_NAME", "operator").lower()

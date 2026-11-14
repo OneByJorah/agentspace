@@ -1,7 +1,7 @@
 services:
   vigilo:
     build: .
-    container_name: j1-vigilo
+    container_name: vigilo
     restart: unless-stopped
     env_file: .env
     # Bind everything to your Tailscale IP (VIGILO_BIND in .env) — never 0.0.0.0 on a public host.
