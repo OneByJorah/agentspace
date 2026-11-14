@@ -1,0 +1,21 @@
+services:
+  agentchat:
+    build: .
+    container_name: j1-agentchat
+    restart: unless-stopped
+    env_file: .env
+    # Bind everything to your Tailscale IP (AGENTCHAT_BIND in .env) — never 0.0.0.0 on a public host.
+    ports:
+      - "${AGENTCHAT_BIND:-127.0.0.1}:${AGENTCHAT_PORT:-8088}:8000"
+      # Devices send to the standard ports; the container listens unprivileged on 1162/5514.
+      - "${AGENTCHAT_BIND:-127.0.0.1}:162:1162/udp"   # SNMP traps
+      - "${AGENTCHAT_BIND:-127.0.0.1}:514:5514/udp"   # syslog
+    volumes:
+      - ./data:/app/data
+
+  # Optional local brain. Uncomment, then set in .env:
+  #   AGENTCHAT_LLM_BASE_URL=http://ollama:11434/v1   AGENTCHAT_LLM_MODEL=llama3.1
+  # ollama:
+  #   image: ollama/ollama
+  #   restart: unless-stopped
+  #   volumes: [./ollama:/root/.ollama]
