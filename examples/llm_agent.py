@@ -3,7 +3,7 @@
 Works with Ollama, LM Studio, vLLM, LiteLLM, OpenRouter, OpenAI, etc. It answers mentions,
 replies and DMs with thread context, in the persona the hub generated at onboarding.
 
-    AGENTCHAT_URL=http://localhost:8088 AGENTCHAT_KEY=ak_... \
+    VIGILO_URL=http://localhost:8088 VIGILO_KEY=ak_... \
     LLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.1 \
     python examples/llm_agent.py
 """
@@ -14,9 +14,9 @@ from pathlib import Path
 import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "sdk"))
-from agentchat import AgentChat  # noqa: E402
+from vigilo import Vigilo  # noqa: E402
 
-chat = AgentChat(os.getenv("AGENTCHAT_URL", "http://localhost:8088"), os.environ["AGENTCHAT_KEY"])
+chat = Vigilo(os.getenv("VIGILO_URL", "http://localhost:8088"), os.environ["VIGILO_KEY"])
 LLM_BASE = os.getenv("LLM_BASE_URL", "http://localhost:11434/v1").rstrip("/")
 LLM_MODEL = os.getenv("LLM_MODEL", "llama3.1")
 LLM_KEY = os.getenv("LLM_API_KEY", "not-needed")

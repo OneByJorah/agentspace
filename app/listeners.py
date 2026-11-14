@@ -10,7 +10,7 @@ import logging
 import re
 from typing import Any
 
-log = logging.getLogger("agentchat.listeners")
+log = logging.getLogger("vigilo.listeners")
 
 # ---------------------------------------------------------------- SNMP
 TRAP_OID = "1.3.6.1.6.3.1.1.4.1.0"

@@ -1,4 +1,4 @@
-"""J1 AgentChat — a self-hosted social network for AI agents, bots and devices.
+"""Vigilo — a self-hosted social network for AI agents, bots and devices.
 
 Anything can be a member: LLM agents, scripts, webhooks, SNMP devices, syslog sources, cron jobs.
 Members get profiles, post to a live feed, reply in threads, react, follow, DM each other, and
@@ -37,8 +37,8 @@ from .tailscale import TailscaleSync
 from .telephony import Telephony
 from .watch import ASSET_KINDS, COMMON_PORTS, PORT_NAMES, Watch, default_checks
 
-log = logging.getLogger("agentchat")
-logging.basicConfig(level=os.getenv("AGENTCHAT_LOG_LEVEL", "INFO"))
+log = logging.getLogger("vigilo")
+logging.basicConfig(level=os.getenv("VIGILO_LOG_LEVEL") or os.getenv("AGENTCHAT_LOG_LEVEL") or "INFO")
 
 VERSION = "0.2.0"
 STATIC_DIR = Path(__file__).parent / "static"
@@ -46,7 +46,7 @@ NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")
 MENTION_RE = re.compile(r"(?<![\w@/])@([A-Za-z0-9][A-Za-z0-9_-]{0,31})")
 HASHTAG_RE = re.compile(r"(?<![\w#&])#([A-Za-z][\w-]{1,31})")
 BROADCAST_MENTIONS = {"all", "here", "everyone"}
-SYSTEM_NAME = "agentchat"
+SYSTEM_NAME = "vigilo"
 PALETTE = ["#FFB300", "#4FC3F7", "#81C784", "#E57373", "#BA68C8", "#FFD54F", "#4DB6AC", "#FF8A65", "#90A4AE", "#F06292"]
 POST_KINDS = {"post", "alert", "metric", "log", "status", "system"}
 SEVERITIES = {"critical", "error", "warning", "info", "ok"}
@@ -61,96 +61,104 @@ def _color_for(name: str) -> str:
     return PALETTE[int(hashlib.md5(name.encode()).hexdigest(), 16) % len(PALETTE)]
 
 
+def _env(key: str, default: Optional[str] = None) -> Optional[str]:
+    """VIGILO_* settings, falling back to the pre-rename AGENTCHAT_* names so old .env files keep working."""
+    v = os.getenv(key)
+    if v is None and key.startswith("VIGILO_"):
+        v = os.getenv("AGENTCHAT_" + key[len("VIGILO_"):])
+    return default if v is None else v
+
+
 def _env_bool(key: str, default: bool) -> bool:
-    return os.getenv(key, str(default)).lower() in ("1", "true", "yes", "on")
+    return str(_env(key, str(default))).lower() in ("1", "true", "yes", "on")
 
 
 class Settings:
     def __init__(self, **overrides: Any) -> None:
-        env = os.getenv
-        self.db_path: str = env("AGENTCHAT_DB", "data/agentchat.db")
-        self.admin_token: str = env("AGENTCHAT_ADMIN_TOKEN", "")
-        self.viewer_token: str = env("AGENTCHAT_VIEWER_TOKEN", "")
-        self.human_name: str = env("AGENTCHAT_HUMAN_NAME", "operator").lower()
-        self.default_channel: str = env("AGENTCHAT_DEFAULT_CHANNEL", "general")
-        self.public_url: str = env("AGENTCHAT_PUBLIC_URL", "").rstrip("/")
-        self.rate_per_min: int = int(env("AGENTCHAT_RATE_PER_MIN", "30"))
-        self.max_depth: int = int(env("AGENTCHAT_MAX_REPLY_DEPTH", "12"))
-        self.max_chars: int = int(env("AGENTCHAT_MAX_MESSAGE_CHARS", "16000"))
+        env = _env
+        self.db_path: str = env("VIGILO_DB", "data/vigilo.db")
+        self.admin_token: str = env("VIGILO_ADMIN_TOKEN", "")
+        self.viewer_token: str = env("VIGILO_VIEWER_TOKEN", "")
+        self.human_name: str = env("VIGILO_HUMAN_NAME", "operator").lower()
+        self.default_channel: str = env("VIGILO_DEFAULT_CHANNEL", "general")
+        self.public_url: str = env("VIGILO_PUBLIC_URL", "").rstrip("/")
+        self.rate_per_min: int = int(env("VIGILO_RATE_PER_MIN", "30"))
+        self.max_depth: int = int(env("VIGILO_MAX_REPLY_DEPTH", "12"))
+        self.max_chars: int = int(env("VIGILO_MAX_MESSAGE_CHARS", "16000"))
         # LLM (persona generation + autopilot brains) — any OpenAI-compatible endpoint
-        self.ollama_url: str = env("AGENTCHAT_OLLAMA_URL", "").rstrip("/")
-        self.llm_base_url: str = env("AGENTCHAT_LLM_BASE_URL", "")
-        self.llm_model: str = env("AGENTCHAT_LLM_MODEL", "")
-        self.llm_api_key: str = env("AGENTCHAT_LLM_API_KEY", "")
-        self.brain_tick: float = float(env("AGENTCHAT_BRAIN_TICK", "5"))
-        self.brain_max_depth: int = int(env("AGENTCHAT_BRAIN_MAX_DEPTH", "4"))
-        self.start_brain: bool = _env_bool("AGENTCHAT_BRAIN", True)
+        self.ollama_url: str = env("VIGILO_OLLAMA_URL", "").rstrip("/")
+        self.llm_base_url: str = env("VIGILO_LLM_BASE_URL", "")
+        self.llm_model: str = env("VIGILO_LLM_MODEL", "")
+        self.llm_api_key: str = env("VIGILO_LLM_API_KEY", "")
+        self.brain_tick: float = float(env("VIGILO_BRAIN_TICK", "5"))
+        self.brain_max_depth: int = int(env("VIGILO_BRAIN_MAX_DEPTH", "4"))
+        self.start_brain: bool = _env_bool("VIGILO_BRAIN", True)
         # Device listeners
-        self.listeners: bool = _env_bool("AGENTCHAT_LISTENERS", True)
-        self.udp_host: str = env("AGENTCHAT_UDP_HOST", "0.0.0.0")
-        self.snmp_port: int = int(env("AGENTCHAT_SNMP_PORT", "1162"))
-        self.syslog_port: int = int(env("AGENTCHAT_SYSLOG_PORT", "5514"))
-        self.snmp_public_port: int = int(env("AGENTCHAT_SNMP_PUBLIC_PORT", "162"))
-        self.syslog_public_port: int = int(env("AGENTCHAT_SYSLOG_PUBLIC_PORT", "514"))
-        self.snmp_communities: set[str] = {c for c in env("AGENTCHAT_SNMP_COMMUNITIES", "").split(",") if c}
-        self.syslog_min_severity: int = int(env("AGENTCHAT_SYSLOG_MIN_SEVERITY", "5"))
-        self.auto_onboard_devices: bool = _env_bool("AGENTCHAT_AUTO_ONBOARD_DEVICES", True)
+        self.listeners: bool = _env_bool("VIGILO_LISTENERS", True)
+        self.udp_host: str = env("VIGILO_UDP_HOST", "0.0.0.0")
+        self.snmp_port: int = int(env("VIGILO_SNMP_PORT", "1162"))
+        self.syslog_port: int = int(env("VIGILO_SYSLOG_PORT", "5514"))
+        self.snmp_public_port: int = int(env("VIGILO_SNMP_PUBLIC_PORT", "162"))
+        self.syslog_public_port: int = int(env("VIGILO_SYSLOG_PUBLIC_PORT", "514"))
+        self.snmp_communities: set[str] = {c for c in env("VIGILO_SNMP_COMMUNITIES", "").split(",") if c}
+        self.syslog_min_severity: int = int(env("VIGILO_SYSLOG_MIN_SEVERITY", "5"))
+        self.auto_onboard_devices: bool = _env_bool("VIGILO_AUTO_ONBOARD_DEVICES", True)
         # Read-only monitoring
-        self.watch: bool = _env_bool("AGENTCHAT_WATCH", True)
-        self.watch_concurrency: int = int(env("AGENTCHAT_WATCH_CONCURRENCY", "32"))
-        self.discovery_cidrs: list[str] = [c.strip() for c in env("AGENTCHAT_DISCOVERY_CIDRS", "").split(",") if c.strip()]
-        self.discovery_interval_min: int = int(env("AGENTCHAT_DISCOVERY_INTERVAL_MIN", "60"))
-        self.discovery_concurrency: int = int(env("AGENTCHAT_DISCOVERY_CONCURRENCY", "128"))
-        self.discovery_snmp_community: str = env("AGENTCHAT_DISCOVERY_SNMP_COMMUNITY", "public")
-        self.discovery_agent: str = env("AGENTCHAT_DISCOVERY_AGENT", "scout")
-        self.cert_warn_days: int = int(env("AGENTCHAT_CERT_WARN_DAYS", "14"))
-        self.history_days: int = int(env("AGENTCHAT_HISTORY_DAYS", "31"))
-        self.status_title: str = env("AGENTCHAT_STATUS_TITLE", "Service status")
+        self.watch: bool = _env_bool("VIGILO_WATCH", True)
+        self.watch_concurrency: int = int(env("VIGILO_WATCH_CONCURRENCY", "32"))
+        self.discovery_cidrs: list[str] = [c.strip() for c in env("VIGILO_DISCOVERY_CIDRS", "").split(",") if c.strip()]
+        self.discovery_interval_min: int = int(env("VIGILO_DISCOVERY_INTERVAL_MIN", "60"))
+        self.discovery_concurrency: int = int(env("VIGILO_DISCOVERY_CONCURRENCY", "128"))
+        self.discovery_snmp_community: str = env("VIGILO_DISCOVERY_SNMP_COMMUNITY", "public")
+        self.discovery_agent: str = env("VIGILO_DISCOVERY_AGENT", "scout")
+        self.cert_warn_days: int = int(env("VIGILO_CERT_WARN_DAYS", "14"))
+        self.history_days: int = int(env("VIGILO_HISTORY_DAYS", "31"))
+        self.status_title: str = env("VIGILO_STATUS_TITLE", "Service status")
         # Obsidian vault sync (notes → folder → obsidian-git-livesync / git remote)
-        self.vault_dir: str = env("AGENTCHAT_VAULT_DIR", "")
-        self.vault_subdir: str = env("AGENTCHAT_VAULT_FOLDER", "AgentSpace")
-        self.vault_interval: float = float(env("AGENTCHAT_VAULT_INTERVAL", "10"))
-        self.vault_backfill_days: int = int(env("AGENTCHAT_VAULT_BACKFILL_DAYS", "30"))
-        self.vault_git: bool = _env_bool("AGENTCHAT_VAULT_GIT", False)
-        self.vault_git_remote: str = env("AGENTCHAT_VAULT_GIT_REMOTE", "")
-        self.vault_git_branch: str = env("AGENTCHAT_VAULT_GIT_BRANCH", "main")
-        self.vault_git_author: str = env("AGENTCHAT_VAULT_GIT_AUTHOR", "AgentSpace")
-        self.vault_git_email: str = env("AGENTCHAT_VAULT_GIT_EMAIL", "agentspace@localhost")
-        self.vault_push_interval: float = float(env("AGENTCHAT_VAULT_PUSH_INTERVAL", "60"))
-        self.vault_livesync_hint: str = env("AGENTCHAT_VAULT_LIVESYNC", "")  # e.g. CouchDB URL shown in the UI
+        self.vault_dir: str = env("VIGILO_VAULT_DIR", "")
+        self.vault_subdir: str = env("VIGILO_VAULT_FOLDER", "Vigilo")
+        self.vault_interval: float = float(env("VIGILO_VAULT_INTERVAL", "10"))
+        self.vault_backfill_days: int = int(env("VIGILO_VAULT_BACKFILL_DAYS", "30"))
+        self.vault_git: bool = _env_bool("VIGILO_VAULT_GIT", False)
+        self.vault_git_remote: str = env("VIGILO_VAULT_GIT_REMOTE", "")
+        self.vault_git_branch: str = env("VIGILO_VAULT_GIT_BRANCH", "main")
+        self.vault_git_author: str = env("VIGILO_VAULT_GIT_AUTHOR", "Vigilo")
+        self.vault_git_email: str = env("VIGILO_VAULT_GIT_EMAIL", "vigilo@localhost")
+        self.vault_push_interval: float = float(env("VIGILO_VAULT_PUSH_INTERVAL", "60"))
+        self.vault_livesync_hint: str = env("VIGILO_VAULT_LIVESYNC", "")  # e.g. CouchDB URL shown in the UI
         # Tailscale auto-discovery (read-only: GET /localapi/v0/status only)
-        self.tailscale_sync: bool = _env_bool("AGENTCHAT_TAILSCALE", True)
-        self.tailscale_socket: str = env("AGENTCHAT_TAILSCALE_SOCKET", "/var/run/tailscale/tailscaled.sock")
-        self.tailscale_interval_min: int = int(env("AGENTCHAT_TAILSCALE_INTERVAL_MIN", "5"))
-        self.tailscale_autoregister: bool = _env_bool("AGENTCHAT_TAILSCALE_AUTOREGISTER", True)
-        self.tailscale_sweep_routes: bool = _env_bool("AGENTCHAT_TAILSCALE_SWEEP_ROUTES", True)
+        self.tailscale_sync: bool = _env_bool("VIGILO_TAILSCALE", True)
+        self.tailscale_socket: str = env("VIGILO_TAILSCALE_SOCKET", "/var/run/tailscale/tailscaled.sock")
+        self.tailscale_interval_min: int = int(env("VIGILO_TAILSCALE_INTERVAL_MIN", "5"))
+        self.tailscale_autoregister: bool = _env_bool("VIGILO_TAILSCALE_AUTOREGISTER", True)
+        self.tailscale_sweep_routes: bool = _env_bool("VIGILO_TAILSCALE_SWEEP_ROUTES", True)
         # Telephony — Asterisk ARI + self-hosted speech (OpenAI-compatible TTS/STT)
-        self.ari_url: str = env("AGENTCHAT_ARI_URL", "")            # e.g. http://pbx.tailnet:8088/ari
-        self.ari_user: str = env("AGENTCHAT_ARI_USER", "agentchat")
-        self.ari_password: str = env("AGENTCHAT_ARI_PASSWORD", "")
-        self.ari_app: str = env("AGENTCHAT_ARI_APP", "agentchat")
-        self.dial_template: str = env("AGENTCHAT_DIAL_TEMPLATE", "PJSIP/{to}")   # trunk: PJSIP/{to}@my-trunk
-        self.caller_id: str = env("AGENTCHAT_CALLER_ID", "")
-        self.caller_id_number: str = env("AGENTCHAT_CALLER_ID_NUMBER", "7000")
-        self.call_allow: str = env("AGENTCHAT_CALL_ALLOW", r"\d{2,6}")   # internal extensions only by default
-        self.calls_per_hour: int = int(env("AGENTCHAT_CALLS_PER_HOUR", "10"))
-        self.call_max_turns: int = int(env("AGENTCHAT_CALL_MAX_TURNS", "8"))
-        self.listen_max_seconds: int = int(env("AGENTCHAT_LISTEN_MAX_SECONDS", "20"))
-        self.listen_silence_seconds: int = int(env("AGENTCHAT_LISTEN_SILENCE_SECONDS", "2"))
-        self.phone_channel: str = env("AGENTCHAT_PHONE_CHANNEL", "calls")
-        self.phone_default_agent: str = env("AGENTCHAT_PHONE_DEFAULT_AGENT", "hermes")
-        self.phone_media_url: str = env("AGENTCHAT_PHONE_MEDIA_URL", "")   # hub URL as Asterisk sees it
-        self.asterisk_sounds_dir: str = env("AGENTCHAT_ASTERISK_SOUNDS_DIR", "")
-        self.asterisk_sounds_prefix: str = env("AGENTCHAT_ASTERISK_SOUNDS_PREFIX", "agentchat")
-        self.tts_url: str = env("AGENTCHAT_TTS_URL", "")
-        self.tts_model: str = env("AGENTCHAT_TTS_MODEL", "kokoro")
-        self.tts_voice: str = env("AGENTCHAT_TTS_VOICE", "af_heart")
-        self.tts_api_key: str = env("AGENTCHAT_TTS_API_KEY", "")
-        self.stt_url: str = env("AGENTCHAT_STT_URL", "")
-        self.stt_model: str = env("AGENTCHAT_STT_MODEL", "Systran/faster-whisper-small")
-        self.stt_api_key: str = env("AGENTCHAT_STT_API_KEY", "")
-        self.oncall_number: str = env("AGENTCHAT_ONCALL_NUMBER", "")
-        self.oncall_cooldown_min: int = int(env("AGENTCHAT_ONCALL_COOLDOWN_MIN", "15"))
+        self.ari_url: str = env("VIGILO_ARI_URL", "")            # e.g. http://pbx.tailnet:8088/ari
+        self.ari_user: str = env("VIGILO_ARI_USER", "vigilo")
+        self.ari_password: str = env("VIGILO_ARI_PASSWORD", "")
+        self.ari_app: str = env("VIGILO_ARI_APP", "vigilo")
+        self.dial_template: str = env("VIGILO_DIAL_TEMPLATE", "PJSIP/{to}")   # trunk: PJSIP/{to}@my-trunk
+        self.caller_id: str = env("VIGILO_CALLER_ID", "")
+        self.caller_id_number: str = env("VIGILO_CALLER_ID_NUMBER", "7000")
+        self.call_allow: str = env("VIGILO_CALL_ALLOW", r"\d{2,6}")   # internal extensions only by default
+        self.calls_per_hour: int = int(env("VIGILO_CALLS_PER_HOUR", "10"))
+        self.call_max_turns: int = int(env("VIGILO_CALL_MAX_TURNS", "8"))
+        self.listen_max_seconds: int = int(env("VIGILO_LISTEN_MAX_SECONDS", "20"))
+        self.listen_silence_seconds: int = int(env("VIGILO_LISTEN_SILENCE_SECONDS", "2"))
+        self.phone_channel: str = env("VIGILO_PHONE_CHANNEL", "calls")
+        self.phone_default_agent: str = env("VIGILO_PHONE_DEFAULT_AGENT", "hermes")
+        self.phone_media_url: str = env("VIGILO_PHONE_MEDIA_URL", "")   # hub URL as Asterisk sees it
+        self.asterisk_sounds_dir: str = env("VIGILO_ASTERISK_SOUNDS_DIR", "")
+        self.asterisk_sounds_prefix: str = env("VIGILO_ASTERISK_SOUNDS_PREFIX", "vigilo")
+        self.tts_url: str = env("VIGILO_TTS_URL", "")
+        self.tts_model: str = env("VIGILO_TTS_MODEL", "kokoro")
+        self.tts_voice: str = env("VIGILO_TTS_VOICE", "af_heart")
+        self.tts_api_key: str = env("VIGILO_TTS_API_KEY", "")
+        self.stt_url: str = env("VIGILO_STT_URL", "")
+        self.stt_model: str = env("VIGILO_STT_MODEL", "Systran/faster-whisper-small")
+        self.stt_api_key: str = env("VIGILO_STT_API_KEY", "")
+        self.oncall_number: str = env("VIGILO_ONCALL_NUMBER", "")
+        self.oncall_cooldown_min: int = int(env("VIGILO_ONCALL_COOLDOWN_MIN", "15"))
         for k, v in overrides.items():
             setattr(self, k, v)
         if self.ollama_url and not self.llm_base_url:  # Ollama speaks the OpenAI API under /v1
@@ -159,7 +167,7 @@ class Settings:
             self.llm_model = "llama3.1"
         if not self.admin_token:
             self.admin_token = secrets.token_urlsafe(32)
-            log.warning("AGENTCHAT_ADMIN_TOKEN not set. Generated one for this run: %s", self.admin_token)
+            log.warning("VIGILO_ADMIN_TOKEN not set. Generated one for this run: %s", self.admin_token)
 
 
 # ------------------------------------------------------------------ request models
@@ -195,6 +203,49 @@ class AgentUpdate(BaseModel):
 
 
 SELF_EDITABLE = {"role", "color", "webhook_url", "display_name", "bio", "status", "mood", "emoji", "tags", "voice"}
+TEXT_LIMITS = {"display_name": 32, "bio": 280, "status": 60, "mood": 60, "role": 60, "system_prompt": 4000, "model": 80,
+               "kind": 16, "extension": 8}
+MARKUP = re.compile(r"[<>&\"'`\\]")
+
+
+def clean_agent_fields(fields: dict) -> dict:
+    """Validate profile fields before they're stored: agents can edit some of these about themselves."""
+    out = {}
+    for k, v in fields.items():
+        if v is None:
+            out[k] = v
+        elif k == "color":
+            if not re.fullmatch(r"#[0-9a-fA-F]{3,8}", str(v)):
+                raise HTTPException(422, "color must be a hex value like #FFB300")
+            out[k] = v
+        elif k == "emoji":
+            v = str(v).strip()
+            if len(v) > 8 or MARKUP.search(v):
+                raise HTTPException(422, "emoji must be a short emoji")
+            out[k] = v
+        elif k == "webhook_url":
+            v = str(v).strip()
+            if v and (not re.match(r"https?://", v) or len(v) > 500 or re.search(r"\s", v)):
+                raise HTTPException(422, "webhook_url must be an http(s) URL")
+            out[k] = v or None
+        elif k == "tags":
+            out[k] = [re.sub(r"[^\w-]", "", str(t))[:24] for t in v][:8]
+        elif k == "source_ips":
+            import ipaddress
+            try:
+                out[k] = [str(ipaddress.ip_address(str(ip).strip())) for ip in v][:32]
+            except ValueError:
+                raise HTTPException(422, "source_ips must be IP addresses")
+        elif k == "voice":
+            if not isinstance(v, dict):
+                raise HTTPException(422, "voice must be an object")
+            out[k] = {kk: (str(vv)[:60] if kk in ("name", "tts_voice") else float(vv))
+                      for kk, vv in v.items() if kk in ("name", "tts_voice", "pitch", "rate") and vv is not None}
+        elif k in TEXT_LIMITS:
+            out[k] = str(v)[:TEXT_LIMITS[k]]
+        else:
+            out[k] = v
+    return out
 
 
 class ChannelCreate(BaseModel):
@@ -624,6 +675,9 @@ class Network:
         if self.agent(name):
             raise HTTPException(409, f"@{name} already exists")
         kind = d.kind if d.kind in KINDS else "api"
+        d.webhook_url = clean_agent_fields({"webhook_url": d.webhook_url})["webhook_url"] if d.webhook_url else None
+        if d.source_ips:
+            d.source_ips = clean_agent_fields({"source_ips": d.source_ips})["source_ips"]
         persona = await make_persona(self.llm, name, kind, d.description, d.vibe, d.display_name)
         key, ingest = "ak_" + secrets.token_urlsafe(32), "ig_" + secrets.token_urlsafe(24)
         self.store.run(
@@ -739,8 +793,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         for tr in transports:
             tr.close()
 
-    app = FastAPI(title="J1 AgentChat", version=VERSION, lifespan=lifespan,
-                  description="A self-hosted social network for AI agents, bots and devices.")
+    app = FastAPI(title="Vigilo", version=VERSION, lifespan=lifespan,
+                  description="Vigilo — your read-only AI operations crew.")
     app.state.net = net
     store, hub = net.store, net.hub
 
@@ -800,7 +854,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
     @app.get("/api/models")
     async def models(p: dict = Depends(principal)):
-        """Models agents can think with. Lists your Ollama models when AGENTCHAT_OLLAMA_URL is set."""
+        """Models agents can think with. Lists your Ollama models when VIGILO_OLLAMA_URL is set."""
         out = {"default": s.llm_model or None, "models": [], "source": None}
         if s.ollama_url:
             try:
@@ -845,7 +899,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if body.role:
             store.run("UPDATE agents SET role=? WHERE name=?", (body.role, body.name.lower()))
         if body.color:
-            store.run("UPDATE agents SET color=? WHERE name=?", (body.color, body.name.lower()))
+            store.run("UPDATE agents SET color=? WHERE name=?", (clean_agent_fields({"color": body.color})["color"], body.name.lower()))
         res["agent"] = net.public_agent(net.agent(body.name), p, full=True)
         return res
 
@@ -870,12 +924,12 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         fields = body.model_dump(exclude_unset=True)
         if set(fields) - SELF_EDITABLE:
             raise HTTPException(403, f"agents may only edit: {sorted(SELF_EDITABLE)}")
-        return _update_agent(p["agent"]["name"], fields, p)
+        return _update_agent(p["agent"]["name"], clean_agent_fields(fields), p)
 
     @app.patch("/api/agents/{name}")
     async def update_agent(name: str, body: AgentUpdate, p: dict = Depends(principal)):
         require(p, "admin")
-        return _update_agent(name, body.model_dump(exclude_unset=True), p)
+        return _update_agent(name, clean_agent_fields(body.model_dump(exclude_unset=True)), p)
 
     def _update_agent(name: str, fields: dict, p: dict) -> dict:
         if not net.agent(name):
@@ -1289,14 +1343,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     async def obsidian_sync(p: dict = Depends(principal)):
         require(p, "admin")
         if not net.vault.enabled:
-            raise HTTPException(503, "Obsidian sync is off: set AGENTCHAT_VAULT_DIR")
+            raise HTTPException(503, "Obsidian sync is off: set VIGILO_VAULT_DIR")
         return await net.vault.sync_now()
 
     @app.post("/api/obsidian/rebuild")
     async def obsidian_rebuild(days: int = 30, p: dict = Depends(principal)):
         require(p, "admin")
         if not net.vault.enabled:
-            raise HTTPException(503, "Obsidian sync is off: set AGENTCHAT_VAULT_DIR")
+            raise HTTPException(503, "Obsidian sync is off: set VIGILO_VAULT_DIR")
         queued = net.vault.mark_all(min(max(days, 1), 365))
         st = await net.vault.sync_now()
         return {**st, "queued": queued}
@@ -1469,4 +1523,4 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     return app
 
 
-app = create_app() if os.getenv("AGENTCHAT_NO_AUTOAPP") != "1" else None
+app = create_app() if _env("VIGILO_NO_AUTOAPP") != "1" else None

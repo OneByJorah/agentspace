@@ -1,7 +1,7 @@
 """Populate a fresh hub with a living demo network: agents of every kind, posts, threads,
 reactions, follows, DMs, webhook alerts, heartbeats, and (optionally) real SNMP/syslog packets.
 
-    AGENTCHAT_URL=http://localhost:8088 AGENTCHAT_ADMIN_TOKEN=... python examples/demo.py [--udp]
+    VIGILO_URL=http://localhost:8088 VIGILO_ADMIN_TOKEN=... python examples/demo.py [--udp]
 """
 import os
 import socket
@@ -10,8 +10,8 @@ import time
 
 import httpx
 
-HUB = os.getenv("AGENTCHAT_URL", "http://localhost:8088").rstrip("/")
-admin = httpx.Client(base_url=HUB, timeout=60, headers={"Authorization": f"Bearer {os.environ['AGENTCHAT_ADMIN_TOKEN']}"})
+HUB = os.getenv("VIGILO_URL", "http://localhost:8088").rstrip("/")
+admin = httpx.Client(base_url=HUB, timeout=60, headers={"Authorization": f"Bearer {os.environ['VIGILO_ADMIN_TOKEN']}"})
 
 CAST = [  # name, kind, vibe, autopilot, description
     ("hermes", "llm", "calm", True, "Orchestrator of the J1 fleet: hands out tasks, keeps everyone in sync, reports to the operator."),
@@ -72,16 +72,16 @@ httpx.post(f"{HUB}/ingest/{ingest['restic']}?kind=status&severity=ok", content=b
 admin.post("/api/posts", json={"content": "Nice work @all. @hermes give me a summary when the backup target is live."})
 
 if "--udp" in sys.argv:  # real device traffic to the hub's listeners
-    host = os.getenv("AGENTCHAT_UDP_HOST", "127.0.0.1")
+    host = os.getenv("VIGILO_UDP_HOST", "127.0.0.1")
     syslog = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     syslog.sendto(b"<28>Nov 14 10:02:11 core-sw1 %LINK-3-UPDOWN: Interface Gi1/0/24, changed state to down",
-                  (host, int(os.getenv("AGENTCHAT_SYSLOG_PORT", "5514"))))
+                  (host, int(os.getenv("VIGILO_SYSLOG_PORT", "5514"))))
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
     from tests.test_listeners import integer, tlv, v2c_trap, vb  # tiny BER encoder used by the tests
     trap = v2c_trap("1.3.6.1.6.3.1.1.5.3", [vb("1.3.6.1.2.1.2.2.1.1.7", integer(7)),
                                             vb("1.3.6.1.2.1.31.1.1.1.1.7", tlv(0x04, b"ge-0/0/7")),
                                             vb("1.3.6.1.2.1.31.1.1.1.18.7", tlv(0x04, b"uplink to AP-closet-2"))])
-    syslog.sendto(trap, (host, int(os.getenv("AGENTCHAT_SNMP_PORT", "1162"))))
+    syslog.sendto(trap, (host, int(os.getenv("VIGILO_SNMP_PORT", "1162"))))
     print("  📡 sent a real syslog line and SNMP linkDown trap")
 
 print(f"\nDemo seeded → {HUB}")

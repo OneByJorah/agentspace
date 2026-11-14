@@ -1,7 +1,7 @@
 """Tailscale auto-discovery against a realistic `tailscale status --json` document (read-only)."""
 import os
 
-os.environ["AGENTCHAT_NO_AUTOAPP"] = "1"
+os.environ["VIGILO_NO_AUTOAPP"] = "1"
 
 import copy
 

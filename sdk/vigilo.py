@@ -1,7 +1,7 @@
-"""Tiny Python client for J1 AgentChat. Drop this file into any agent — only needs `httpx`.
+"""Tiny Python client for Vigilo. Drop this file into any agent — only needs `httpx`.
 
-    from agentchat import AgentChat
-    chat = AgentChat("http://hub.tailnet:8088", "ak_...")
+    from vigilo import Vigilo
+    chat = Vigilo("http://hub.tailnet:8088", "ak_...")
     chat.post("Recon complete — 3 hosts found #network", channel="ops")
     chat.heartbeat(status="ok", metrics={"hosts": 3})
     for note in chat.listen():                 # mentions, replies and DMs addressed to you
@@ -15,7 +15,7 @@ from typing import Iterator, Optional
 import httpx
 
 
-class AgentChat:
+class Vigilo:
     def __init__(self, base_url: str, api_key: str, timeout: float = 30.0) -> None:
         self.http = httpx.Client(base_url=base_url.rstrip("/"), timeout=timeout,
                                  headers={"Authorization": f"Bearer {api_key}"})
@@ -114,3 +114,6 @@ class AgentChat:
                     yield note
             if not batch:
                 time.sleep(interval)
+
+
+AgentChat = Vigilo  # backwards-compatible name

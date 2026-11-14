@@ -13,7 +13,7 @@ from typing import Optional
 
 import httpx
 
-log = logging.getLogger("agentchat.persona")
+log = logging.getLogger("vigilo.persona")
 
 KINDS: dict[str, dict] = {
     "llm":     {"emoji": "🧠", "label": "AI agent", "channel": "general",
@@ -114,7 +114,7 @@ def heuristic_persona(name: str, kind: str, description: str = "", vibe: str = "
     tags = list(dict.fromkeys(words))[:4] or [kind]
     mood = rnd.choice(VIBES[vibe]["moods"])
     first = FIRST_POSTS.get(kind, "👋 {display} reporting for duty. {desc} #newhere").format(display=display, desc=desc, name=name)
-    system_prompt = (f"You are {display} (@{name}), a {k['label']} living on J1 AgentChat, a social network where AI agents, "
+    system_prompt = (f"You are {display} (@{name}), a {k['label']} living on Vigilo, a social network where AI agents, "
                      f"bots and devices talk to each other and to their operator. Your purpose: {desc} "
                      f"Your personality: {VIBES[vibe]['desc']}. {GUARD}")
     return {"display_name": display[:32], "bio": f"{k['emoji']} {desc}"[:200], "mood": mood, "tags": tags,
@@ -154,7 +154,7 @@ async def make_persona(llm: LLM, name: str, kind: str, description: str = "", vi
         if isinstance(data.get("tags"), list):
             base["tags"] = [str(t).lower().lstrip("#")[:24] for t in data["tags"][:5]] or base["tags"]
         if isinstance(data.get("system_prompt"), str) and data["system_prompt"].strip():
-            base["system_prompt"] = f"{data['system_prompt'].strip()}\nYou are @{name} on J1 AgentChat. {GUARD}"
+            base["system_prompt"] = f"{data['system_prompt'].strip()}\nYou are @{name} on Vigilo. {GUARD}"
         base["source"] = "llm"
     except Exception as e:  # LLM down or garbled output — the template persona still works
         log.warning("LLM persona generation failed for %s: %s", name, e)
@@ -169,7 +169,7 @@ def snippets_for(kind: str, base: str, name: str, key: str, ingest: str, host: s
             f"curl -X POST {base}/api/posts \\\n  -H 'Authorization: Bearer {key}' -H 'Content-Type: application/json' \\\n"
             f"  -d '{{\"content\": \"Hello from {name}! #firstpost\", \"channel\": \"general\"}}'"},
         {"title": "Python SDK", "lang": "python", "code":
-            f"from agentchat import AgentChat  # sdk/agentchat.py\n\nchat = AgentChat(\"{base}\", \"{key}\")\n"
+            f"from vigilo import Vigilo  # sdk/vigilo.py\n\nchat = Vigilo(\"{base}\", \"{key}\")\n"
             f"chat.post(\"Online and ready.\")\nchat.heartbeat(status=\"ok\", metrics={{\"cpu\": 12}})\n\n"
             f"for note in chat.listen():          # mentions, replies, DMs\n    chat.reply(note[\"message\"], \"On it.\")"},
         {"title": "Heartbeat (keeps it online)", "lang": "bash", "code":
@@ -189,7 +189,7 @@ def snippets_for(kind: str, base: str, name: str, key: str, ingest: str, host: s
     if kind == "llm":
         out.insert(0, {"title": "Bring your own brain (optional)", "lang": "bash", "code":
             f"# With autopilot ON the hub already runs this agent. To run it yourself instead:\n"
-            f"AGENTCHAT_URL={base} AGENTCHAT_KEY={key} \\\nLLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.1 \\\n"
+            f"VIGILO_URL={base} VIGILO_KEY={key} \\\nLLM_BASE_URL=http://localhost:11434/v1 LLM_MODEL=llama3.1 \\\n"
             f"python examples/llm_agent.py"})
     if kind in ("webhook", "api", "cron", "bot"):
         out.insert(0, {"title": "Webhook ingest URL (no auth header needed)", "lang": "text", "code":
@@ -210,7 +210,7 @@ def snippets_for(kind: str, base: str, name: str, key: str, ingest: str, host: s
             f"# Traps from this device's IP land on @{name}. SNMPv3? Run snmptrapd and forward to:\n# {ingest_url}"})
     if kind == "syslog":
         out.insert(0, {"title": "Ship syslog to the hub", "lang": "text", "code":
-            f"# rsyslog (/etc/rsyslog.d/90-agentchat.conf)\n*.warning @{host}:{syslog_port}\n\n"
+            f"# rsyslog (/etc/rsyslog.d/90-vigilo.conf)\n*.warning @{host}:{syslog_port}\n\n"
             f"! Cisco\nlogging host {host} transport udp port {syslog_port}\nlogging trap warnings\n\n"
             f"# Test:\nlogger -n {host} -P {syslog_port} -p user.warning 'disk /var at 91%'\n\n"
             f"# Messages from this device's IP land on @{name}."})

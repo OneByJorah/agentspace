@@ -1,9 +1,9 @@
 """Obsidian vault sync: every chat, alert, thread, DM, call, asset and agent becomes a Markdown note.
 
-Notes are written into a vault folder (AGENTCHAT_VAULT_DIR). From there:
+Notes are written into a vault folder (VIGILO_VAULT_DIR). From there:
   • obsidian-git-livesync `watch` pushes them into CouchDB → Obsidian's Self-hosted LiveSync on every device
     (the all-in-one stack runs this for you), and/or
-  • the folder is a git repo: AgentSpace commits every batch and pushes to AGENTCHAT_VAULT_GIT_REMOTE
+  • the folder is a git repo: Vigilo commits every batch and pushes to VIGILO_VAULT_GIT_REMOTE
     (a bare repo with obsidian-git-livesync's post-receive hook, GitHub, Gitea, …).
 Notes are regenerated from the database, so they're idempotent: unchanged notes are never rewritten.
 Everything is one-way (hub → vault). Nothing in the vault is read back as instructions.
@@ -22,7 +22,7 @@ from typing import Optional
 
 from .db import MSG_SQL
 
-log = logging.getLogger("agentchat.obsidian")
+log = logging.getLogger("vigilo.obsidian")
 
 DEFAULT_PREFS = {"daily": True, "alerts": True, "threads": True, "dms": True, "calls": True, "assets": True, "agents": True}
 SEV_ICON = {"critical": "🔥", "error": "🔴", "warning": "🟠", "info": "🔵", "ok": "🟢"}
@@ -160,8 +160,8 @@ class Vault:
     def link_agent(self, name: str) -> str:
         if name == self.s.human_name:
             return f"**@{name}**"
-        if name == "agentchat":
-            return "**AgentSpace**"
+        if name == "vigilo":
+            return "**Vigilo**"
         if self.net.agent(name):
             return f"[[{self.s.vault_subdir}/Agents/{name}|@{name}]]"
         return f"@{name}"
@@ -222,9 +222,9 @@ class Vault:
                 return None
             alerts = sum(1 for m in ms if m["kind"] == "alert")
             people = sorted({m["author_name"] for m in ms})
-            out = _yaml({"date": key, "type": "agentspace-daily", "posts": len(ms), "alerts": alerts,
-                         "tags": ["agentspace", "daily"]})
-            out += f"# {key} · AgentSpace\n\n{len(ms)} posts · {alerts} alert(s) · {len(people)} voices · [[{sub}/Alerts/{key}|alerts]]\n\n"
+            out = _yaml({"date": key, "type": "vigilo-daily", "posts": len(ms), "alerts": alerts,
+                         "tags": ["vigilo", "daily"]})
+            out += f"# {key} · Vigilo\n\n{len(ms)} posts · {alerts} alert(s) · {len(people)} voices · [[{sub}/Alerts/{key}|alerts]]\n\n"
             out += "\n".join(self.msg_block(m) for m in ms)
             return f"{sub}/Daily/{key}.md", out
         if kind == "alerts" and p["alerts"]:
@@ -233,8 +233,8 @@ class Vault:
                            "AND m.created_at>=? AND m.created_at<?", (a, b))
             if not ms:
                 return None
-            out = _yaml({"date": key, "type": "agentspace-alerts", "alerts": len(ms),
-                         "critical": sum(1 for m in ms if m["severity"] == "critical"), "tags": ["agentspace", "alerts"]})
+            out = _yaml({"date": key, "type": "vigilo-alerts", "alerts": len(ms),
+                         "critical": sum(1 for m in ms if m["severity"] == "critical"), "tags": ["vigilo", "alerts"]})
             out += f"# Alerts · {key}\n\n"
             for m in ms:
                 first = re.sub(r"[*`]", "", m["content"].splitlines()[0])[:90]
@@ -260,10 +260,10 @@ class Vault:
                 return None
             ms = self.msgs("(m.id=? OR m.root_id=?)", (key, key))
             people = sorted({m["author_name"] for m in ms})
-            out = _yaml({"type": "agentspace-call" if meta.get("call") else "agentspace-thread", "id": key,
+            out = _yaml({"type": "vigilo-call" if meta.get("call") else "vigilo-thread", "id": key,
                          "channel": root["channel"], "started": _dt(root["created_at"]).isoformat(timespec="minutes"),
                          "messages": len(ms), "participants": people,
-                         "tags": ["agentspace", "call" if meta.get("call") else "thread"]})
+                         "tags": ["vigilo", "call" if meta.get("call") else "thread"]})
             title = re.sub(r"[*`>]", "", root["content"].splitlines()[0])[:100]
             out += f"# {title}\n\n{len(ms)} message(s) · {', '.join(self.link_agent(x) for x in people)}\n\n"
             for m in ms:
@@ -274,7 +274,7 @@ class Vault:
             if not ms:
                 return None
             members = key.split("~")[1:]
-            out = _yaml({"type": "agentspace-dm", "members": members, "messages": len(ms), "tags": ["agentspace", "dm"]})
+            out = _yaml({"type": "vigilo-dm", "members": members, "messages": len(ms), "tags": ["vigilo", "dm"]})
             out += f"# 🔒 {' ↔ '.join('@' + x for x in members)}\n\n"
             last_day = None
             for m in ms:
@@ -290,11 +290,11 @@ class Vault:
                 return None
             st = json.loads(a["state"] or "{}")
             up = self.net.watch.uptime(a["id"])
-            out = _yaml({"type": "agentspace-asset", "asset": a["name"], "kind": a["kind"], "target": a["target"],
+            out = _yaml({"type": "vigilo-asset", "asset": a["name"], "kind": a["kind"], "target": a["target"],
                          "status": st.get("reported", "unknown"), "uptime_24h": up["24h"], "uptime_7d": up["7d"],
                          "uptime_30d": up["30d"], "latency_ms": st.get("latency_ms"), "cert_days": st.get("cert_days"),
                          "critical": bool(a["critical"]), "last_check": _dt(a["last_check"]).isoformat(timespec="minutes") if a["last_check"] else None,
-                         "tags": ["agentspace", "asset", a["kind"]]})
+                         "tags": ["vigilo", "asset", a["kind"]]})
             icon = {"up": "🟢", "down": "🔴", "degraded": "🟠"}.get(st.get("reported"), "⚪")
             out += f"# {icon} {a['name']}\n\n`{a['target']}` · {a['kind']} · feed {self.link_agent(a['agent_name'])}\n\n"
             out += f"| uptime 24h | 7d | 30d | latency | TLS |\n|---|---|---|---|---|\n"
@@ -325,10 +325,10 @@ class Vault:
             if not ag:
                 return None
             pub = self.net.public_agent(ag)
-            out = _yaml({"type": "agentspace-agent", "handle": key, "display_name": pub["display_name"], "kind": pub["kind"],
+            out = _yaml({"type": "vigilo-agent", "handle": key, "display_name": pub["display_name"], "kind": pub["kind"],
                          "mood": pub["mood"], "status": pub["status"], "extension": pub["extension"] or None,
                          "autopilot": pub["autopilot"], "analyst": pub["listens_alerts"],
-                         "tags": ["agentspace", "agent", pub["kind"]]})
+                         "tags": ["vigilo", "agent", pub["kind"]]})
             out += f"# {pub['emoji']} {pub['display_name']} (@{key})\n\n{pub['bio']}\n\n"
             out += f"- **kind** {pub['kind']} · **mood** {pub['mood'] or '—'} · **status** {pub['status'] or '—'}"
             out += f" · **ext** {pub['extension']}\n" if pub["extension"] else "\n"
@@ -345,8 +345,8 @@ class Vault:
             today = _dt(time.time()).strftime("%Y-%m-%d")
             assets = self.net.store.all("SELECT * FROM assets ORDER BY name")
             agents = self.net.store.all("SELECT name, kind, display_name FROM agents ORDER BY name")
-            out = _yaml({"type": "agentspace-index", "tags": ["agentspace"]})  # no wall-clock stamp: unchanged state = unchanged note
-            out += f"# AgentSpace\n\nRead-only AI operations log, synced from AgentSpace.\n\n"
+            out = _yaml({"type": "vigilo-index", "tags": ["vigilo"]})  # no wall-clock stamp: unchanged state = unchanged note
+            out += f"# Vigilo\n\nRead-only AI operations log, synced from Vigilo.\n\n"
             out += f"- Today: [[{sub}/Daily/{today}|daily log]] · [[{sub}/Alerts/{today}|alerts]]\n\n"
             if assets:
                 out += "## Assets\n"
@@ -355,7 +355,7 @@ class Vault:
                     out += f"- {({'up': '🟢', 'down': '🔴', 'degraded': '🟠'}).get(st, '⚪')} [[{sub}/Assets/{a['agent_name']}|{a['name']}]] · {a['kind']} · {st}\n"
                 out += "\n"
             out += "## Agents\n" + "\n".join(f"- [[{sub}/Agents/{g['name']}|{g['display_name'] or g['name']}]] · {g['kind']}" for g in agents) + "\n"
-            return f"{sub}/AgentSpace.md", out
+            return f"{sub}/Vigilo.md", out
         return None
 
     def write(self, rel: str, text: str) -> bool:
@@ -425,7 +425,7 @@ class Vault:
             self.pending_commit = False  # clear first: notes written while git runs set it again → next commit
             await self._git("add", "-A", "--", self.s.vault_subdir)
             if (await self._git("status", "--porcelain", "--", self.s.vault_subdir)):
-                await self._git("commit", "-q", "-m", f"AgentSpace: note updates {_dt(time.time()).strftime('%Y-%m-%d %H:%M')}")
+                await self._git("commit", "-q", "-m", f"Vigilo: note updates {_dt(time.time()).strftime('%Y-%m-%d %H:%M')}")
                 self.last_commit = time.time()
         if self.s.vault_git_remote and (force_push or time.time() - self.last_push_try >= self.s.vault_push_interval):
             self.last_push_try = time.time()

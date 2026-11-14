@@ -155,8 +155,10 @@ class Store:
         self.lock = threading.Lock()
         with self.lock:
             self.conn.execute("PRAGMA foreign_keys=ON")
+            self.conn.execute("PRAGMA busy_timeout=5000")
             if path != ":memory:":
                 self.conn.execute("PRAGMA journal_mode=WAL")
+                self.conn.execute("PRAGMA synchronous=NORMAL")  # safe with WAL, far fewer fsyncs on small disks
             self.conn.executescript(SCHEMA)
             for table, cols in ADDED_COLUMNS.items():
                 have = {r["name"] for r in self.conn.execute(f"PRAGMA table_info({table})")}

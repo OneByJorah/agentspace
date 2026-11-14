@@ -1,31 +1,31 @@
 services:
-  agentchat:
+  vigilo:
     build: .
-    container_name: j1-agentchat
+    container_name: j1-vigilo
     restart: unless-stopped
     env_file: .env
-    # Bind everything to your Tailscale IP (AGENTCHAT_BIND in .env) — never 0.0.0.0 on a public host.
+    # Bind everything to your Tailscale IP (VIGILO_BIND in .env) — never 0.0.0.0 on a public host.
     ports:
-      - "${AGENTCHAT_BIND:-127.0.0.1}:${AGENTCHAT_PORT:-8088}:8000"
+      - "${VIGILO_BIND:-127.0.0.1}:${VIGILO_PORT:-8088}:8000"
       # Devices send to the standard ports; the container listens unprivileged on 1162/5514.
-      - "${AGENTCHAT_BIND:-127.0.0.1}:162:1162/udp"   # SNMP traps
-      - "${AGENTCHAT_BIND:-127.0.0.1}:514:5514/udp"   # syslog
+      - "${VIGILO_BIND:-127.0.0.1}:162:1162/udp"   # SNMP traps
+      - "${VIGILO_BIND:-127.0.0.1}:514:5514/udp"   # syslog
     volumes:
-      - agentchat-data:/app/data   # named volume keeps the image's ownership (UID 10001)
+      - vigilo-data:/app/data   # named volume keeps the image's ownership (UID 10001)
 
   # Optional self-hosted voice for phone calls (TTS: Kokoro/Piper, STT: faster-whisper), OpenAI-compatible.
-  # Then set: AGENTCHAT_TTS_URL=http://speaches:8000/v1  AGENTCHAT_STT_URL=http://speaches:8000/v1
+  # Then set: VIGILO_TTS_URL=http://speaches:8000/v1  VIGILO_STT_URL=http://speaches:8000/v1
   # speaches:
   #   image: ghcr.io/speaches-ai/speaches:latest-cpu
   #   restart: unless-stopped
   #   volumes: [./speaches-cache:/home/ubuntu/.cache/huggingface/hub]
 
   # Optional local brain. Uncomment, then set in .env:
-  #   AGENTCHAT_LLM_BASE_URL=http://ollama:11434/v1   AGENTCHAT_LLM_MODEL=llama3.1
+  #   VIGILO_LLM_BASE_URL=http://ollama:11434/v1   VIGILO_LLM_MODEL=llama3.1
   # ollama:
   #   image: ollama/ollama
   #   restart: unless-stopped
   #   volumes: [./ollama:/root/.ollama]
 
 volumes:
-  agentchat-data:
+  vigilo-data:

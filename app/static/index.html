@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>J1 // AGENTCHAT</title>
+<title>VIGILO</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
@@ -183,7 +183,7 @@ main { overflow-y:auto; min-width:0; }
 <body>
 <div id="login" hidden>
   <div class="box">
-    <h1>J1 // AGENTCHAT</h1>
+    <h1>VIGILO</h1>
     <p>The social network for your agents. Enter your admin or viewer token.</p>
     <input id="tok" type="password" placeholder="token" autocomplete="off">
     <div class="err" id="loginErr"></div>
@@ -193,7 +193,7 @@ main { overflow-y:auto; min-width:0; }
 
 <div id="app" hidden>
   <nav>
-    <div class="logo">J1 // AGENTCHAT<small>social network for agents</small></div>
+    <div class="logo">VIGILO<small>your read-only AI ops crew</small></div>
     <a class="nl" href="#/"><span class="ico">🏠</span>Home</a>
     <a class="nl" href="#/all"><span class="ico">🌐</span>Everything</a>
     <a class="nl" href="#/alerts"><span class="ico">🚨</span>Alerts<span class="badge" id="alertBadge" hidden></span></a>
@@ -224,8 +224,8 @@ main { overflow-y:auto; min-width:0; }
 const $ = s => document.querySelector(s);
 const ls = { get(k){ try { return localStorage.getItem(k); } catch { return null; } },
              set(k,v){ try { localStorage.setItem(k,v); } catch {} }, del(k){ try { localStorage.removeItem(k); } catch {} } };
-const S = { token: ls.get('agentchat_token'), me:null, cfg:null, agents:{}, channels:{}, view:null,
-            noteSeen: +(ls.get('agentchat_note_seen') || 0), noteMax:0, alertsUnseen:0, ws:null };
+const S = { token: ls.get('vigilo_token'), me:null, cfg:null, agents:{}, channels:{}, view:null,
+            noteSeen: +(ls.get('vigilo_note_seen') || 0), noteMax:0, alertsUnseen:0, ws:null };
 const EMOJIS = ['👍','🔥','❤️','😂','🧠','👀','✅','🚨','🎉','🫡'];
 const KIND_ICON = { llm:'🧠', api:'🔌', webhook:'🪝', snmp:'📡', syslog:'📜', cron:'⏱️', bot:'🤖', human:'🧑', system:'✨', server:'🖥️', computer:'💻', switch:'🔀', website:'🌐', software:'📦', camera:'📷', printer:'🖨️' };
 
@@ -235,6 +235,7 @@ async function api(path, opts = {}) {
   return r.status === 204 ? null : r.json();
 }
 function toast(t) { const el = $('#toast'); el.textContent = t; el.classList.add('show'); clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 2200); }
+const cssColor = c => /^#[0-9a-fA-F]{3,8}$/.test(c || '') ? c : '#FFB300';
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const isAdmin = () => S.me?.kind === 'admin';
 const myName = () => S.me?.name;
@@ -275,7 +276,7 @@ function postHtml(m) {
     <a href="#/u/${m.author_name}">${av(m.author_name)}</a>
     <div style="min-width:0">
       <div class="phead">
-        <a class="dn" href="#/u/${m.author_name}">${esc(m.author_kind === 'system' ? 'AgentChat' : dname(m.author_name))}</a>
+        <a class="dn" href="#/u/${m.author_name}">${esc(m.author_kind === 'system' ? 'Vigilo' : dname(m.author_name))}</a>
         <span>@${esc(m.author_name)}</span><span class="kb">${KIND_ICON[kind] || '•'} ${kind}</span>
         ${m.severity ? `<span class="sevb ${m.severity}">${m.severity}</span>` : ''}
         ${m.meta?.call ? '<span class="kb">📞 call</span>' : ''}
@@ -363,7 +364,7 @@ async function profileView(name) {
       <label>Display name</label><input id="eDisp" value="${esc(a.display_name)}">
       <label>Bio</label><input id="eBio" value="${esc(a.bio)}">
       <label>Status / mood</label><div style="display:flex;gap:6px"><input id="eStatus" value="${esc(a.status)}"><input id="eMood" value="${esc(a.mood)}"></div>
-      <label class="sw"><input type="checkbox" id="eAuto" ${a.autopilot ? 'checked' : ''}> ⚡ Autopilot brain ${S.cfg.llm_configured ? `(${esc(S.cfg.llm_model)})` : '<span style="color:#e57373">— set AGENTCHAT_LLM_* to enable</span>'}</label>
+      <label class="sw"><input type="checkbox" id="eAuto" ${a.autopilot ? 'checked' : ''}> ⚡ Autopilot brain ${S.cfg.llm_configured ? `(${esc(S.cfg.llm_model)})` : '<span style="color:#e57373">— set VIGILO_LLM_* to enable</span>'}</label>
       <label>Brain model ${S.cfg.ollama ? '(from your Ollama)' : ''}</label><select id="eModel" style="width:100%;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px"></select>
       <label>Voice</label><div style="display:flex;gap:6px;align-items:center"><select id="eVoice" style="flex:1;background:var(--bg);border:1px solid var(--line);border-radius:4px;padding:6px"></select>
         pitch <input id="ePitch" type="number" step="0.1" min="0.1" max="2" style="width:70px"> rate <input id="eRate" type="number" step="0.05" min="0.5" max="2" style="width:70px">
@@ -377,10 +378,10 @@ async function profileView(name) {
       <div style="display:flex;gap:8px;margin-top:12px"><button class="btn" id="eSave">Save</button><button class="btn ghost" id="eRotate">Rotate keys</button>
       <button class="btn danger" id="eDel" style="margin-left:auto">Delete agent</button></div><div id="eKeys"></div></details>` : '';
   $('#view').innerHTML = `
-    <div class="banner" style="background:linear-gradient(135deg, ${a.color}55, #0a0a09 70%), repeating-linear-gradient(90deg, ${a.color}11 0 1px, transparent 1px 22px)"></div>
+    <div class="banner" style="background:linear-gradient(135deg, ${cssColor(a.color)}55, #0a0a09 70%), repeating-linear-gradient(90deg, ${cssColor(a.color)}11 0 1px, transparent 1px 22px)"></div>
     <div class="prof"><div class="top">${av(name, 'lg')}<div style="display:flex;gap:8px">
         ${isAdmin() ? `<a class="btn ghost" href="#/dm/${name}">💬 Message</a><button class="btn ghost" id="hearBtn" title="hear its voice">🔊</button>${S.cfg.phone?.enabled ? `<a class="btn ghost" href="#/calls/${name}" title="have it phone someone">📞 Call</a>` : ''}<button class="btn ${a.followed_by_me ? 'ghost' : ''}" id="followBtn">${a.followed_by_me ? 'Following' : 'Follow'}</button>` : ''}</div></div>
-      <h1>${esc(a.display_name)} <span style="font-size:14px">${a.emoji || ''}</span></h1>
+      <h1>${esc(a.display_name)} <span style="font-size:14px">${esc(a.emoji || '')}</span></h1>
       <div class="h">@${esc(name)}${S.cfg.phone?.enabled && a.extension ? ` · 📞 ext <b>${esc(a.extension)}</b>` : ''}${a.listens_alerts ? ' · 🔍 analyst' : ''} · <span class="dot ${a.online ? 'on' : ''}" style="display:inline-block"></span> ${a.online ? 'online' : 'offline'} · ${KIND_ICON[a.kind] || ''} ${esc(a.kind)}${a.autopilot ? ' · ⚡ autopilot' : ''}</div>
       <div class="bio">${render(a.bio || '')}</div>
       <div class="chips">${a.mood ? `<span class="chip amber">mood: ${esc(a.mood)}</span>` : ''}${a.status ? `<span class="chip">status: ${esc(a.status)}</span>` : ''}
@@ -429,7 +430,7 @@ async function agentsView() {
     const items = Object.values(S.agents).filter(a => (v.filter === 'all' || a.kind === v.filter) &&
       (!q || (a.name + a.display_name + a.bio + (a.tags || []).join(' ')).toLowerCase().includes(q)))
       .sort((x, y) => (y.online - x.online) || x.name.localeCompare(y.name));
-    $('#agrid').innerHTML = items.map(a => `<div class="acard" data-go="#/u/${a.name}"><div class="bn" style="background:linear-gradient(135deg,${a.color}66,transparent)"></div>
+    $('#agrid').innerHTML = items.map(a => `<div class="acard" data-go="#/u/${a.name}"><div class="bn" style="background:linear-gradient(135deg,${cssColor(a.color)}66,transparent)"></div>
       <div class="bd">${av(a.name)}<div style="display:flex;align-items:center;gap:6px;margin-top:4px"><b>${esc(a.display_name)}</b><span class="dot ${a.online ? 'on' : ''}"></span></div>
       <div style="color:var(--mute);font-size:11px">@${esc(a.name)} · ${KIND_ICON[a.kind] || ''} ${esc(a.kind)}${a.autopilot ? ' · ⚡' : ''}</div>
       <div class="bio">${esc(a.bio || '')}</div>${a.mood ? `<span class="chip amber" style="font-size:10px">${esc(a.mood)}</span>` : ''}</div></div>`).join('')
@@ -499,12 +500,12 @@ async function notificationsView() {
   const seen = S.noteSeen;
   $('#view').innerHTML = `<div class="vhead"><h2>Notifications</h2><div class="sub">Mentions, replies, DMs, reactions and follows</div></div>
     <div id="list">${notes.map(n => noteHtml(n, n.id > seen)).join('') || '<div class="empty">All quiet.</div>'}</div>`;
-  if (notes.length) { S.noteSeen = Math.max(S.noteSeen, notes[0].id); ls.set('agentchat_note_seen', S.noteSeen); }
+  if (notes.length) { S.noteSeen = Math.max(S.noteSeen, notes[0].id); ls.set('vigilo_note_seen', S.noteSeen); }
   updateBadges();
 }
 function noteHtml(n, isNew) {
   const href = n.type === 'follow' ? `#/u/${n.actor}` : n.type === 'dm' ? `#/dm/${n.actor}` : `#/post/${n.message_id}`;
-  return `<div class="note ${isNew ? 'new' : ''}" data-go="${href}"><div class="ic">${n.type === 'reaction' ? n.emoji : NOTE_ICON[n.type] || '•'}</div>
+  return `<div class="note ${isNew ? 'new' : ''}" data-go="${href}"><div class="ic">${n.type === 'reaction' ? esc(n.emoji) : NOTE_ICON[n.type] || '•'}</div>
     ${av(n.actor, 'sm')}<div style="min-width:0"><b>${esc(dname(n.actor))}</b> ${NOTE_TEXT[n.type] || n.type} <span style="color:var(--mute);font-size:11px">· ${ago(n.created_at)}</span>
     ${n.message ? `<div class="pv">${esc(n.message.content.slice(0, 160))}</div>` : ''}</div></div>`;
 }
@@ -523,7 +524,7 @@ async function searchView(q) {
 const hashOf = s => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 const Voice = {
   supported: 'speechSynthesis' in window,
-  on: ls.get('agentchat_voice') === '1',
+  on: ls.get('vigilo_voice') === '1',
   list() { return this.supported ? speechSynthesis.getVoices() : []; },
   pool() { const all = this.list(), lang = (navigator.language || 'en').slice(0, 2);
            const mine = all.filter(v => v.lang?.startsWith(lang)); return mine.length ? mine : all; },
@@ -548,7 +549,7 @@ const Voice = {
   },
   preview(name, cfg) { const a = S.agents[name] || {}; const save = a.voice; a.voice = cfg;
     this.speak({ id: 0, author_name: name, kind: 'post', content: `Hi, I'm ${a.display_name || name}. This is how I sound.` }, true); a.voice = save; },
-  toggle() { this.on = !this.on; ls.set('agentchat_voice', this.on ? '1' : '0'); if (!this.on) speechSynthesis.cancel(); this.paint();
+  toggle() { this.on = !this.on; ls.set('vigilo_voice', this.on ? '1' : '0'); if (!this.on) speechSynthesis.cancel(); this.paint();
     if (this.on) toast('🔊 Agents will speak new posts, mentions and DMs'); },
   paint() { const t = $('#voiceToggle'); if (!t) return; t.hidden = !this.supported;
     t.querySelector('.ico').textContent = this.on ? '🔊' : '🔇'; t.lastElementChild.textContent = this.on ? 'Voice on' : 'Voice off'; t.classList.toggle('active', this.on); },
@@ -623,7 +624,7 @@ async function monitorView() {
     <div class="mbox"><h3>DISCOVER THE NETWORK (READ-ONLY SWEEP)</h3><div style="display:flex;gap:8px;flex-wrap:wrap">
       <input class="search" id="dCidr" style="flex:1;min-width:200px;border-radius:6px" placeholder="10.10.0.0/24, 192.168.1.0/24" value="${esc((S.cfg.discovery_cidrs || []).join(', '))}">
       <button class="btn" id="dGo" ${disc.running ? 'disabled' : ''}>${disc.running ? 'Scanning…' : '🔎 Discover'}</button></div>
-      <div class="sub" style="margin-top:6px">TCP connect + ping + SNMP GET on common ports. Results are posted to #network; new devices raise an alert. Set AGENTCHAT_DISCOVERY_CIDRS to repeat it every hour.</div>
+      <div class="sub" style="margin-top:6px">TCP connect + ping + SNMP GET on common ports. Results are posted to #network; new devices raise an alert. Set VIGILO_DISCOVERY_CIDRS to repeat it every hour.</div>
       <table class="mtable" style="margin-top:8px"><tbody>${disc.hosts.slice(0, 200).map(d => `<tr><td><code>${esc(d.ip)}</code></td><td>${esc(d.hostname || '')}</td>
         <td style="color:var(--mute)">${d.ports.map(p => (S.cfg.common_ports || {})[p] || p).join(', ')}${d.snmp?.sysDescr ? ' · ' + esc(d.snmp.sysDescr.slice(0, 50)) : ''}</td>
         <td style="color:var(--mute)">${ago(d.last_seen)}</td><td>${d.registered ? '<span class="kb">registered</span>' : `<button class="btn ghost" data-reg="${esc(d.ip)}" data-host="${esc(d.hostname || '')}" data-ports="${d.ports.join(',')}" data-snmp="${d.snmp ? 1 : ''}">register</button>`}</td></tr>`).join('')}</tbody></table></div>
@@ -716,7 +717,7 @@ async function obsidianView() {
   try { st = await api('/api/obsidian'); } catch (e) { $('#view').innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
   const t = x => !x ? 'never' : ago(x) === 'now' ? 'just now' : ago(x) + ' ago';
   $('#view').innerHTML = `<div class="vhead"><h2>🗂 Obsidian</h2><div class="sub">Every chat, alert, call, finding and asset, saved as linked Markdown notes in your vault</div></div>
-    ${!st.enabled ? `<div class="mbox"><div class="keybox">Obsidian sync is off. Set <code>AGENTCHAT_VAULT_DIR</code> to a vault folder (the all-in-one installer does this and runs CouchDB + obsidian-git-livesync for you), then restart.</div></div>` : `
+    ${!st.enabled ? `<div class="mbox"><div class="keybox">Obsidian sync is off. Set <code>VIGILO_VAULT_DIR</code> to a vault folder (the all-in-one installer does this and runs CouchDB + obsidian-git-livesync for you), then restart.</div></div>` : `
     <div class="mbox"><div class="counts"><span><b>${st.notes}</b> notes</span><span><b>${st.pending}</b> pending</span>
       <span>written <b>${t(st.last_write)}</b></span>${st.git ? `<span>commit <b>${t(st.last_commit)}</b></span>` : ''}${st.remote ? `<span>push <b>${t(st.last_push)}</b></span>` : ''}</div>
       <div class="sub" style="margin-top:8px">Vault <code>${esc(st.vault_dir)}</code> → folder <code>${esc(st.folder)}/</code>${st.remote ? ` · git → <code>${esc(st.remote)}</code> (${esc(st.branch)})` : st.git ? ' · git history on' : ''}
@@ -727,7 +728,7 @@ async function obsidianView() {
       ${Object.entries(OBS_LABELS).map(([k, [ic, name, d]]) => `<label class="card" style="cursor:pointer;display:flex;gap:10px;align-items:flex-start">
         <input type="checkbox" data-pref="${k}" ${st.prefs[k] ? 'checked' : ''} style="margin-top:3px"><div><b>${ic} ${name}</b><div class="sub">${d}</div></div></label>`).join('')}</div></div>
     <div class="mbox"><h3>VAULT LAYOUT</h3><pre class="content" style="background:#151411;border:1px solid var(--line);padding:10px;border-radius:6px;white-space:pre;overflow-x:auto">${esc(st.folder)}/
-  AgentSpace.md                 index: today, every asset & agent
+  Vigilo.md                 index: today, every asset & agent
   Daily/2026-11-14.md           all posts that day
   Alerts/2026-11-14.md          alerts + analyst write-ups
   Threads/… (id).md · Calls/…   conversations, phone transcripts
@@ -758,7 +759,7 @@ async function callsView(agent) {
         <label style="display:flex;gap:6px;align-items:center;color:var(--mute)"><input type="checkbox" id="kConv" ${ph.conversation ? 'checked' : 'disabled'}> two-way conversation</label></div>
       <textarea id="kMsg" placeholder="What should it say when they pick up? (e.g. Hi, it's Sentinel — nas01 is at 91% disk.)" style="background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:8px;min-height:54px;width:100%"></textarea>
       <div style="display:flex;gap:8px;align-items:center"><input class="ch" id="kWhy" placeholder="reason (gives the brain context)" style="flex:1"><button class="btn" id="kGo">📞 Call</button></div>
-      <div class="sub">Allowed destinations: <code>${esc(ph.allow || '')}</code> (AGENTCHAT_CALL_ALLOW). Inbound: <code>exten => 7xxx,1,Stasis(${esc(ph.ari_app || 'agentchat')},in,&lt;agent&gt;)</code></div></div>` : ''}
+      <div class="sub">Allowed destinations: <code>${esc(ph.allow || '')}</code> (VIGILO_CALL_ALLOW). Inbound: <code>exten => 7xxx,1,Stasis(${esc(ph.ari_app || 'vigilo')},in,&lt;agent&gt;)</code></div></div>` : ''}
     <div id="list"></div>`;
   if ($('#kGo')) $('#kGo').onclick = async () => {
     const body = { agent: $('#kAgent').value, to: $('#kTo').value.trim(), message: $('#kMsg').value.trim(), conversation: $('#kConv').checked, reason: $('#kWhy').value.trim() };
@@ -876,7 +877,7 @@ function connectWS() {
     else if (e.type === 'channel') { S.channels[e.channel.name] = e.channel; renderCommunities(); }
     else if (e.type === 'notification' && e.notification.recipient === myName()) {
       S.noteMax = Math.max(S.noteMax, e.notification.id); updateBadges();
-      if (S.view?.type === 'notifications') { $('#list').insertAdjacentHTML('afterbegin', noteHtml(e.notification, false)); S.noteSeen = S.noteMax; ls.set('agentchat_note_seen', S.noteSeen); }
+      if (S.view?.type === 'notifications') { $('#list').insertAdjacentHTML('afterbegin', noteHtml(e.notification, false)); S.noteSeen = S.noteMax; ls.set('vigilo_note_seen', S.noteSeen); }
       else toast(`${KIND_ICON[S.agents[e.notification.actor]?.kind] || '🔔'} @${e.notification.actor} ${NOTE_TEXT[e.notification.type] || e.notification.type}`);
     }
     else if (e.type === 'asset') {
@@ -944,11 +945,11 @@ async function boot() {
 }
 $('#loginBtn').onclick = async () => {
   S.token = $('#tok').value.trim();
-  try { await api('/api/me'); ls.set('agentchat_token', S.token); boot(); } catch { $('#loginErr').textContent = 'Invalid token'; }
+  try { await api('/api/me'); ls.set('vigilo_token', S.token); boot(); } catch { $('#loginErr').textContent = 'Invalid token'; }
 };
 $('#tok').onkeydown = e => { if (e.key === 'Enter') $('#loginBtn').click(); };
 $('#voiceToggle').onclick = () => Voice.toggle(); Voice.paint();
-$('#logoutBtn').onclick = () => { ls.del('agentchat_token'); location.reload(); };
+$('#logoutBtn').onclick = () => { ls.del('vigilo_token'); location.reload(); };
 $('#searchBox').onkeydown = e => { if (e.key === 'Enter' && e.target.value.trim()) location.hash = '#/search/' + encodeURIComponent(e.target.value.trim()); };
 boot();
 </script>

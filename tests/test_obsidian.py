@@ -1,7 +1,7 @@
 """Obsidian vault sync: notes, wikilinks, idempotence, prefs, git commit + push to a bare remote."""
 import os
 
-os.environ["AGENTCHAT_NO_AUTOAPP"] = "1"
+os.environ["VIGILO_NO_AUTOAPP"] = "1"
 
 import subprocess
 
@@ -37,18 +37,18 @@ def test_vault_notes_git_and_prefs(tmp_path):
 
         st = c.post("/api/obsidian/sync", headers=H).json()
         assert st["enabled"] and st["notes"] >= 6 and st["error"] is None, st
-        root = vault / "AgentSpace"
+        root = vault / "Vigilo"
         daily = next((root / "Daily").glob("*.md")).read_text()
-        assert 'type: "agentspace-daily"' in daily and "[[AgentSpace/Agents/scout|@scout]]" in daily and "#network" in daily
+        assert 'type: "vigilo-daily"' in daily and "[[Vigilo/Agents/scout|@scout]]" in daily and "#network" in daily
         alerts = next((root / "Alerts").glob("*.md")).read_text()
-        assert "NAS01 is DOWN" in alerts and "🔍 analysis" in alerts and "[[AgentSpace/Assets/nas01|nas01]]" in alerts \
-            or "[[AgentSpace/Agents/nas01|@nas01]]" in alerts
+        assert "NAS01 is DOWN" in alerts and "🔍 analysis" in alerts and "[[Vigilo/Assets/nas01|nas01]]" in alerts \
+            or "[[Vigilo/Agents/nas01|@nas01]]" in alerts
         assert "systemctl status smbd" in alerts
         thread = next((root / "Threads").glob("*.md")).read_text()
-        assert 'type: "agentspace-thread"' in thread and "participants" in thread
+        assert 'type: "vigilo-thread"' in thread and "participants" in thread
         assert (root / "DMs" / "hermes--scout.md").read_text().count("psst") == 1
         assert "# " in (root / "Agents" / "hermes.md").read_text()
-        assert (root / "Assets" / "nas01.md").exists() and "AgentSpace.md" in [p.name for p in root.iterdir()]
+        assert (root / "Assets" / "nas01.md").exists() and "Vigilo.md" in [p.name for p in root.iterdir()]
 
         # idempotent: nothing changed → nothing rewritten
         net.vault.mark_all()
@@ -56,9 +56,9 @@ def test_vault_notes_git_and_prefs(tmp_path):
 
         # pushed to the bare remote on main (what obsidian-git-livesync's post-receive hook listens to)
         log = subprocess.run(["git", "--git-dir", str(remote), "log", "--oneline", "main"], capture_output=True, text=True).stdout
-        assert "AgentSpace:" in log
+        assert "Vigilo:" in log
         files = subprocess.run(["git", "--git-dir", str(remote), "ls-tree", "-r", "--name-only", "main"], capture_output=True, text=True).stdout
-        assert "AgentSpace/DMs/hermes--scout.md" in files
+        assert "Vigilo/DMs/hermes--scout.md" in files
 
         # prefs: turn DMs off → new DMs are no longer written
         assert c.patch("/api/obsidian", json={"dms": False}, headers=H).json()["prefs"]["dms"] is False

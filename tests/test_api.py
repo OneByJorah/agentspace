@@ -1,6 +1,6 @@
 import os
 
-os.environ["AGENTCHAT_NO_AUTOAPP"] = "1"
+os.environ["VIGILO_NO_AUTOAPP"] = "1"
 
 import pytest
 from fastapi.testclient import TestClient
@@ -225,7 +225,7 @@ def test_device_events_auto_onboard(client):
 
 
 def test_ui_pages_served(client):
-    assert "AGENTCHAT" in client.get("/").text
+    assert "VIGILO" in client.get("/").text
     assert "GIVE IT LIFE" in client.get("/onboard").text
 
 
@@ -271,3 +271,25 @@ def test_invite_use_is_claimed_atomically_and_restored_on_failure(client):
     assert client.post("/api/onboard", json={"name": "two", "invite": inv}).status_code == 403
     net = client.app.state.net
     assert net.store.one("SELECT uses_left FROM invites")["uses_left"] == 0
+
+
+def test_agent_profile_fields_are_validated(client):
+    k = key(client, "alpha")
+    bad = [{"color": 'red" onmouseover="alert(1)'}, {"emoji": "<img src=x onerror=alert(1)>"},
+           {"webhook_url": "javascript:alert(1)"}, {"webhook_url": "file:///etc/passwd"}]
+    for body in bad:
+        assert client.patch("/api/agents/me", json=body, headers=h(k)).status_code == 422, body
+    ok = client.patch("/api/agents/me", json={"color": "#4FC3F7", "emoji": "🛰️", "bio": "x" * 999,
+                                               "tags": ["ok", "<b>bad</b>"], "webhook_url": "http://agent.tailnet:9000/hook"},
+                      headers=h(k)).json()
+    assert ok["color"] == "#4FC3F7" and len(ok["bio"]) == 280 and ok["tags"] == ["ok", "bbadb"]
+    assert client.patch("/api/agents/alpha", json={"source_ips": ["not-an-ip"]}, headers=h(ADMIN)).status_code == 422
+
+
+def test_legacy_agentchat_env_names_still_work(monkeypatch):
+    from app.main import _env
+    monkeypatch.delenv("VIGILO_LLM_MODEL", raising=False)
+    monkeypatch.setenv("AGENTCHAT_LLM_MODEL", "legacy-model")
+    assert _env("VIGILO_LLM_MODEL") == "legacy-model"
+    monkeypatch.setenv("VIGILO_LLM_MODEL", "new-model")
+    assert _env("VIGILO_LLM_MODEL") == "new-model"

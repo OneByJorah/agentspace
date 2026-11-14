@@ -27,7 +27,7 @@ import httpx
 
 from .listeners import _oid, _seq, _tlv, _val, oid_name
 
-log = logging.getLogger("agentchat.watch")
+log = logging.getLogger("vigilo.watch")
 
 ASSET_KINDS = {
     "server":   {"emoji": "🖥️", "label": "server"},
@@ -109,7 +109,7 @@ async def probe_http(url: str, expect: Optional[int] = None, contains: Optional[
     out: dict = {}
     try:
         async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, verify=False,
-                                     headers={"User-Agent": "AgentSpace-ReadOnly-Monitor/1.0"}) as c:
+                                     headers={"User-Agent": "Vigilo-ReadOnly-Monitor/1.0"}) as c:
             r = await c.get(url)
         out = {"status": r.status_code, "ms": round((time.perf_counter() - t0) * 1000, 1)}
         ok = (r.status_code == expect) if expect else r.status_code < 400
@@ -389,11 +389,20 @@ class Watch:
         self.last_discovery = 0.0
         self.discovering = False
         self.extra_cidrs: list[str] = []  # e.g. Tailscale subnet routes
+        self._uptime_cache: dict[int, tuple[float, dict]] = {}
 
     def asset(self, aid: int) -> Optional[dict]:
         return self.net.store.one("SELECT * FROM assets WHERE id=?", (aid,))
 
     def uptime(self, aid: int) -> dict:
+        hit = self._uptime_cache.get(aid)
+        if hit and time.time() - hit[0] < 60:  # dashboards poll often; month-long aggregates don't need to be live
+            return hit[1]
+        out = self._uptime(aid)
+        self._uptime_cache[aid] = (time.time(), out)
+        return out
+
+    def _uptime(self, aid: int) -> dict:
         now, out = time.time(), {}
         for label, secs in (("24h", 86400), ("7d", 7 * 86400), ("30d", 30 * 86400)):
             r = self.net.store.one("SELECT AVG(ok) AS u, COUNT(*) AS n, AVG(ms) AS ms FROM samples WHERE asset_id=? AND ts>?",
@@ -498,6 +507,7 @@ class Watch:
         net.store.run("UPDATE assets SET state=?, last_check=? WHERE id=?", (json.dumps(state), time.time(), a["id"]))
         net.store.run("INSERT INTO samples(asset_id, ts, ok, ms) VALUES (?,?,?,?)",
                       (a["id"], time.time(), int(status != "down"), state["latency_ms"]))
+        self._uptime_cache.pop(a["id"], None)  # new sample → recompute on next read
         in_maintenance = (a["maintenance_until"] or 0) > time.time()
         agent = net.agent(a["agent_name"])
         if agent:
@@ -603,7 +613,7 @@ class Watch:
                 if is_new and f["ip"] not in registered:
                     new.append(f)
             scout = net.agent(self.s.discovery_agent) or None
-            author = {"kind": "agent", "name": scout["name"], "agent": scout} if scout else {"kind": "system", "name": "agentchat"}
+            author = {"kind": "agent", "name": scout["name"], "agent": scout} if scout else {"kind": "system", "name": "vigilo"}
 
             def fmt(f):
                 svc = ", ".join(PORT_NAMES.get(p, str(p)) for p in f["ports"]) or "no common ports"

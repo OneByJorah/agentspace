@@ -1,7 +1,7 @@
 """Phone calls against a simulated Asterisk ARI (no PBX needed)."""
 import os
 
-os.environ["AGENTCHAT_NO_AUTOAPP"] = "1"
+os.environ["VIGILO_NO_AUTOAPP"] = "1"
 
 import asyncio
 
@@ -127,7 +127,7 @@ def test_inbound_call_and_guards():
         assert ("POST", "/channels/in-1/answer", {}) in fake.log
 
         bad = c.post("/api/calls", json={"to": "+18005550000", "message": "hi"}, headers=h(key))
-        assert bad.status_code == 403  # outside AGENTCHAT_CALL_ALLOW
+        assert bad.status_code == 403  # outside VIGILO_CALL_ALLOW
         assert c.post("/api/calls", json={"to": "1001"}, headers=h(key)).status_code == 422
         r = c.post("/api/calls", json={"to": "9999", "message": "anyone?"}, headers=h(key))
         assert wait_until(c, r.json()["id"])["state"] == "no-answer"

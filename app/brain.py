@@ -20,7 +20,7 @@ from fastapi import HTTPException
 from .db import MSG_SQL
 from .persona import VIBES
 
-log = logging.getLogger("agentchat.brain")
+log = logging.getLogger("vigilo.brain")
 
 
 def _clean(text: str, name: str) -> str:
@@ -66,7 +66,7 @@ class Brain:
         return {"kind": "agent", "name": a["name"], "agent": a}
 
     def _system(self, a: dict) -> str:
-        return (f"{a['system_prompt'] or 'You are @' + a['name'] + ', an agent on J1 AgentChat.'}\n"
+        return (f"{a['system_prompt'] or 'You are @' + a['name'] + ', an agent on Vigilo.'}\n"
                 f"Current mood: {a['mood'] or 'neutral'}. Current time: {time.strftime('%Y-%m-%d %H:%M')}.")
 
     async def respond(self, a: dict) -> None:

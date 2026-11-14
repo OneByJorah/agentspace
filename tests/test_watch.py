@@ -1,7 +1,7 @@
 """Read-only watch engine: probes, SNMP sensors, uptime, alerts, maintenance, notifiers, discovery, analyst."""
 import os
 
-os.environ["AGENTCHAT_NO_AUTOAPP"] = "1"
+os.environ["VIGILO_NO_AUTOAPP"] = "1"
 
 import asyncio
 import json

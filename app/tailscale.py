@@ -21,7 +21,7 @@ from typing import Optional
 
 import httpx
 
-log = logging.getLogger("agentchat.tailscale")
+log = logging.getLogger("vigilo.tailscale")
 
 NODES: dict[str, dict] = {}  # node id → latest peer record (read by the "tailscale" check in watch.py)
 
@@ -130,7 +130,7 @@ class TailscaleSync:
 
     def _author(self) -> dict:
         a = self.net.agent(self.s.discovery_agent)
-        return {"kind": "agent", "name": a["name"], "agent": a} if a else {"kind": "system", "name": "agentchat"}
+        return {"kind": "agent", "name": a["name"], "agent": a} if a else {"kind": "system", "name": "vigilo"}
 
     async def _post(self, author: dict, text: str, kind: str, severity: Optional[str]) -> None:
         try:

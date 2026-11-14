@@ -14,7 +14,7 @@ from email.message import EmailMessage
 
 import httpx
 
-log = logging.getLogger("agentchat.notify")
+log = logging.getLogger("vigilo.notify")
 SEV_RANK = {"ok": 0, "info": 1, "warning": 2, "error": 3, "critical": 4}
 TYPES = {
     "webhook":  ["url"],

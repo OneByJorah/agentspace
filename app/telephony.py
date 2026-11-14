@@ -2,7 +2,7 @@
 
 How a call works
   outbound: POST /api/calls → ARI originate (channel id = call id) → callee answers → StasisStart
-  inbound:  dialplan `Stasis(agentchat,in,<agent>)` → StasisStart → answer
+  inbound:  dialplan `Stasis(vigilo,in,<agent>)` → StasisStart → answer
   then:     speak (TTS → 8 kHz WAV → ARI play) ⇄ listen (ARI record → STT) ⇄ think (agent's Ollama brain)
 Every line of the call is posted live as a thread on the agent's feed, so you can read along.
 
@@ -27,7 +27,7 @@ from urllib.parse import quote
 import httpx
 from fastapi import HTTPException
 
-log = logging.getLogger("agentchat.phone")
+log = logging.getLogger("vigilo.phone")
 BYE = re.compile(r"\b(bye|goodbye|good bye|hang up|that'?s all|adi[oó]s|chao|ciao)\b", re.I)
 PHONE_GUARD = ("You are read-only: you can explain, advise and alert, but never change or run anything — say what a human "
                "should do instead. You are speaking on a live phone call. Reply in one or two short, natural spoken sentences. "
@@ -229,7 +229,7 @@ class Telephony:
             return f"sound:{self.s.asterisk_sounds_prefix}/{mid}"
         base = self.s.phone_media_url or self.s.public_url
         if not base:
-            raise RuntimeError("set AGENTCHAT_PUBLIC_URL (or AGENTCHAT_PHONE_MEDIA_URL) so Asterisk can fetch speech audio")
+            raise RuntimeError("set VIGILO_PUBLIC_URL (or VIGILO_PHONE_MEDIA_URL) so Asterisk can fetch speech audio")
         self.media[mid] = data
         while len(self.media) > 300:
             self.media.popitem(last=False)
@@ -244,7 +244,7 @@ class Telephony:
                             and (e.get("playback") or {}).get("id") == pid, timeout=20 + len(text) / 8)
 
     async def listen(self, call: Call) -> str:
-        name = f"agentchat-{call.id}-{call.turns}-{secrets.token_hex(3)}"
+        name = f"vigilo-{call.id}-{call.turns}-{secrets.token_hex(3)}"
         await self.ari("POST", f"/channels/{call.channel}/record", params={
             "name": name, "format": "wav", "maxDurationSeconds": self.s.listen_max_seconds,
             "maxSilenceSeconds": self.s.listen_silence_seconds, "ifExists": "overwrite", "beep": "false",
@@ -283,7 +283,7 @@ class Telephony:
         elif who == "caller":
             author = {"kind": "human", "name": "phone-" + (re.sub(r"\D", "", call.number) or "caller")[-15:]}
         else:
-            author = {"kind": "system", "name": "agentchat"}
+            author = {"kind": "system", "name": "vigilo"}
         prefix = "🗣 " if who == "caller" else ""
         try:
             await net.create_post(author, None, prefix + text, reply_to=call.root_id, meta=meta,
@@ -328,7 +328,7 @@ class Telephony:
                 await self.say(call, greeting)
                 history.append(("assistant", greeting))
             if call.conversation and not self.can_listen:
-                await self.line(call, "system", "ℹ️ Two-way talk needs AGENTCHAT_STT_URL and an LLM; this was a one-way message.")
+                await self.line(call, "system", "ℹ️ Two-way talk needs VIGILO_STT_URL and an LLM; this was a one-way message.")
             misses = 0
             while call.conversation and self.can_listen and call.turns < call.max_turns and not call.hungup:
                 heard = await self.listen(call)
@@ -386,14 +386,14 @@ class Telephony:
                          max_turns: Optional[int] = None, reason: str = "", by: str = "", bypass_allow: bool = False) -> dict:
         s = self.s
         if not self.enabled:
-            raise HTTPException(503, "telephony is off: set AGENTCHAT_ARI_URL / _USER / _PASSWORD")
+            raise HTTPException(503, "telephony is off: set VIGILO_ARI_URL / _USER / _PASSWORD")
         if not self.connected:
-            raise HTTPException(503, "not connected to Asterisk ARI (check AGENTCHAT_ARI_URL, ari.conf and http.conf)")
+            raise HTTPException(503, "not connected to Asterisk ARI (check VIGILO_ARI_URL, ari.conf and http.conf)")
         if not self.can_speak:
-            raise HTTPException(503, "calls need a voice: set AGENTCHAT_TTS_URL (OpenAI-compatible /audio/speech)")
+            raise HTTPException(503, "calls need a voice: set VIGILO_TTS_URL (OpenAI-compatible /audio/speech)")
         to = re.sub(r"[\s().-]", "", to)
         if not to or (not bypass_allow and not re.fullmatch(s.call_allow, to)):
-            raise HTTPException(403, f"destination {to!r} not allowed by AGENTCHAT_CALL_ALLOW ({s.call_allow})")
+            raise HTTPException(403, f"destination {to!r} not allowed by VIGILO_CALL_ALLOW ({s.call_allow})")
         if not message and not conversation:
             raise HTTPException(422, "give the call a message, or set conversation=true")
         q, cutoff = self.rate[agent["name"]], time.time() - 3600
