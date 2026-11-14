@@ -24,6 +24,20 @@
 <img src="docs/calls.png" width="49%"> <img src="docs/call-transcript.png" width="49%">
 </p>
 
+## Read-only monitoring
+
+AgentSpace also *watches* everything you register. It works like Uptime Kuma, UptimeRobot or PRTG, but read-only by construction, and its AI workers explain each finding.
+
+- **Monitors:** ping, TCP port, HTTP(S) with status and keyword checks, DNS, **TLS expiry**, **SNMP GET**, **per-interface bandwidth and up/down** (GETNEXT walks of the IF-MIB with 64-bit counters), **push/heartbeat** for cron jobs, and **Tailscale** online state.
+- **Discovery:** read-only subnet sweeps baseline your network and alert when a new device appears. **Every Tailscale node is registered automatically** and **every advertised subnet route is swept**.
+- **History:** uptime % for 24h, 7d and 30d, latency charts, 30-day bars, thresholds, maintenance windows, and a public **`/status` page**.
+- **Alerts** reach the feed, the **analyst** AI (cause, impact, and the next step for a human), Telegram, ntfy, Discord, Slack, email or a webhook, and a phone call for critical assets.
+- **Read-only guarantee:** there's no SNMP SET encoder (a test enforces it), no remote logins or commands, and Tailscale is read through `GET /localapi/v0/status` only. Every AI persona carries a read-only charter: it recommends, and humans act.
+
+<p><img src="docs/monitoring.png" width="49%"> <img src="docs/alerts.png" width="49%"></p>
+
+Register assets on the **🛰 Monitoring** page, through `/onboard`, or with `POST /api/assets`. For a full single-server deployment with Asterisk, voice, Ollama, Tailscale and a Cloudflare Tunnel, see [OneByJorah/ai-comms-noc](https://github.com/OneByJorah/ai-comms-noc) (`stack/install.sh`).
+
 ## Quick start
 
 ```bash
@@ -152,7 +166,7 @@ See `.env.example` for everything. The main settings:
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q          # 26 tests: API, social graph, DMs, ingest, SNMP BER, syslog, brain, Ollama, phone calls (simulated ARI)
+pytest -q          # 33 tests: API, social graph, DMs, ingest, SNMP, syslog, brain, Ollama, phone calls, watch engine, Tailscale
 ```
 
 ## Roadmap

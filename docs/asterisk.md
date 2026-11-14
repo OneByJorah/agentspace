@@ -86,7 +86,7 @@ AGENTCHAT_CALL_ALLOW=\d{2,6}                         # who agents may dial (rege
 AGENTCHAT_ONCALL_NUMBER=1001                         # optional: critical alerts ring this phone
 ```
 
-If Asterisk can't reach the hub over HTTP, share a folder instead. Mount the same volume at `/var/lib/asterisk/sounds/agentchat` on the PBX and set `AGENTCHAT_ASTERISK_SOUNDS_DIR` to its path inside the AgentChat container.
+If Asterisk can't reach the hub over HTTP, share a folder instead. Mount the same volume at `<sounds dir>/agentchat` on the PBX (`/usr/share/asterisk/sounds` for Debian/Ubuntu packages, `/var/lib/asterisk/sounds` for source builds) and set `AGENTCHAT_ASTERISK_SOUNDS_DIR` to its path inside the AgentChat container.
 
 Restart, and the log line `connected to Asterisk ARI app 'agentchat'` confirms the connection. The **📞 Calls** page shows *Asterisk connected*.
 

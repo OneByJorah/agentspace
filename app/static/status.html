@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status</title>
+<style>
+:root { --bg:#0a0a09; --panel:#11110f; --line:#24231f; --amber:#FFB300; --txt:#e8e4d8; --mute:#8a867a; --ok:#43a047; --bad:#e53935; --warn:#FFB300; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--txt); font:14px/1.5 'JetBrains Mono', ui-monospace, monospace; }
+.wrap { max-width:860px; margin:0 auto; padding:40px 20px; }
+h1 { margin:0; font-size:22px; } h1 span { color:var(--amber); }
+.banner { margin:22px 0; padding:16px 18px; border-radius:10px; font-weight:700; }
+.banner.ok { background:#12301a; color:#a5d6a7; border:1px solid #2e7d32; }
+.banner.bad { background:#3a1414; color:#ff8a80; border:1px solid #c62828; }
+.banner.warn { background:#3a2c00; color:var(--amber); border:1px solid #7a5600; }
+.svc { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:14px 16px; margin-bottom:10px; }
+.row { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.st { font-size:12px; font-weight:700; text-transform:uppercase; }
+.st.up { color:var(--ok); } .st.down { color:var(--bad); } .st.degraded, .st.maint { color:var(--warn); } .st.unknown { color:var(--mute); }
+.bars { display:flex; gap:2px; margin-top:10px; height:28px; }
+.bar { flex:1; border-radius:2px; background:#2a2924; }
+.legend { display:flex; justify-content:space-between; color:var(--mute); font-size:11px; margin-top:4px; }
+.foot { color:var(--mute); font-size:11px; margin-top:28px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1 id="title">Service <span>status</span></h1>
+  <div id="banner" class="banner ok">Loading…</div>
+  <div id="list"></div>
+  <div class="foot">Read-only monitoring · updates every 60 s · <span id="ts"></span></div>
+</div>
+<script>
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function color(u) { if (u == null) return '#2a2924'; if (u >= 0.999) return '#43a047'; if (u >= 0.98) return '#9ccc65'; if (u >= 0.9) return '#FFB300'; return '#e53935'; }
+async function load() {
+  const d = await fetch('/api/status').then(r => r.json());
+  document.title = d.title; const t = document.getElementById("title"); t.innerHTML = esc(d.title).replace(/(\S+)$/, '<span>$1</span>');
+  const down = d.assets.filter(a => a.status === 'down' && !a.in_maintenance), deg = d.assets.filter(a => a.status === 'degraded' && !a.in_maintenance);
+  const b = document.getElementById('banner');
+  b.className = 'banner ' + (down.length ? 'bad' : deg.length ? 'warn' : 'ok');
+  b.textContent = !d.assets.length ? 'No public services yet.' : down.length ? `${down.length} service(s) down` : deg.length ? `${deg.length} service(s) degraded` : 'All systems operational';
+  const days = [...Array(30)].map((_, i) => new Date(Date.now() - (29 - i) * 864e5).toISOString().slice(0, 10));
+  document.getElementById('list').innerHTML = d.assets.map(a => {
+    const byDay = Object.fromEntries((a.daily || []).map(x => [x.day, x.up]));
+    const st = a.in_maintenance ? 'maint' : a.status;
+    return `<div class="svc"><div class="row"><b>${esc(a.name)}</b><span class="st ${st}">${a.in_maintenance ? 'maintenance' : esc(a.status)}</span></div>
+      <div class="bars">${days.map(day => `<div class="bar" style="background:${color(byDay[day])}" title="${day}: ${byDay[day] == null ? 'no data' : (byDay[day] * 100).toFixed(2) + '%'}"></div>`).join('')}</div>
+      <div class="legend"><span>30 days ago</span><span>${a.uptime['30d'] == null ? '—' : a.uptime['30d'] + '% uptime'}</span><span>today</span></div></div>`;
+  }).join('');
+  document.getElementById('ts').textContent = new Date().toLocaleTimeString();
+}
+load(); setInterval(load, 60000);
+</script>
+</body>
+</html>

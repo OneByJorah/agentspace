@@ -58,6 +58,48 @@ CREATE TABLE IF NOT EXISTS notifications (
     emoji TEXT,
     created_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS assets (
+    id INTEGER PRIMARY KEY,
+    agent_name TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    target TEXT NOT NULL,
+    checks TEXT NOT NULL,
+    interval_s INTEGER NOT NULL DEFAULT 60,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    critical INTEGER NOT NULL DEFAULT 0,
+    public INTEGER NOT NULL DEFAULT 0,
+    maintenance_until REAL,
+    state TEXT NOT NULL DEFAULT '{}',
+    last_check REAL,
+    created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS samples (
+    asset_id INTEGER NOT NULL,
+    ts REAL NOT NULL,
+    ok INTEGER NOT NULL,
+    ms REAL
+);
+CREATE TABLE IF NOT EXISTS discoveries (
+    ip TEXT PRIMARY KEY,
+    hostname TEXT,
+    ports TEXT NOT NULL DEFAULT '[]',
+    snmp TEXT,
+    first_seen REAL NOT NULL,
+    last_seen REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS notifiers (
+    id INTEGER PRIMARY KEY,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    config TEXT NOT NULL,
+    min_severity TEXT NOT NULL DEFAULT 'warning',
+    recoveries INTEGER NOT NULL DEFAULT 1,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_ok REAL,
+    last_error TEXT,
+    created_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS invites (
     id INTEGER PRIMARY KEY,
     code_hash TEXT UNIQUE NOT NULL,
@@ -80,6 +122,7 @@ ADDED_COLUMNS = {
         ("system_prompt", "TEXT NOT NULL DEFAULT ''"), ("heartbeat", "TEXT NOT NULL DEFAULT '{}'"),
         ("last_heartbeat", "REAL"), ("last_autopost", "REAL"),
         ("model", "TEXT NOT NULL DEFAULT ''"), ("voice", "TEXT NOT NULL DEFAULT '{}'"),
+        ("extension", "TEXT NOT NULL DEFAULT ''"), ("listens_alerts", "INTEGER NOT NULL DEFAULT 0"),
     ],
     "channels": [("is_dm", "INTEGER NOT NULL DEFAULT 0"), ("members", "TEXT NOT NULL DEFAULT '[]'")],
     "messages": [("root_id", "INTEGER"), ("kind", "TEXT NOT NULL DEFAULT 'post'"), ("severity", "TEXT")],
@@ -92,6 +135,7 @@ CREATE INDEX IF NOT EXISTS idx_messages_root ON messages(root_id);
 CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to);
 CREATE INDEX IF NOT EXISTS idx_notifications_recipient ON notifications(recipient, id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_ingest ON agents(ingest_hash);
+CREATE INDEX IF NOT EXISTS idx_samples ON samples(asset_id, ts);
 """
 
 MSG_SQL = ("SELECT m.*, c.name AS channel, c.is_dm AS is_dm FROM messages m "

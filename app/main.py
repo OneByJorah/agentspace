@@ -31,7 +31,10 @@ from .db import MSG_SQL, Store
 from .ingest import format_webhook
 from .listeners import start_listeners
 from .persona import KINDS, LLM, VIBES, make_persona, snippets_for
+from .notify import TYPES as NOTIFIER_TYPES, Notifier, send as notifier_send
+from .tailscale import TailscaleSync
 from .telephony import Telephony
+from .watch import ASSET_KINDS, COMMON_PORTS, PORT_NAMES, Watch, default_checks
 
 log = logging.getLogger("agentchat")
 logging.basicConfig(level=os.getenv("AGENTCHAT_LOG_LEVEL", "INFO"))
@@ -91,6 +94,23 @@ class Settings:
         self.snmp_communities: set[str] = {c for c in env("AGENTCHAT_SNMP_COMMUNITIES", "").split(",") if c}
         self.syslog_min_severity: int = int(env("AGENTCHAT_SYSLOG_MIN_SEVERITY", "5"))
         self.auto_onboard_devices: bool = _env_bool("AGENTCHAT_AUTO_ONBOARD_DEVICES", True)
+        # Read-only monitoring
+        self.watch: bool = _env_bool("AGENTCHAT_WATCH", True)
+        self.watch_concurrency: int = int(env("AGENTCHAT_WATCH_CONCURRENCY", "32"))
+        self.discovery_cidrs: list[str] = [c.strip() for c in env("AGENTCHAT_DISCOVERY_CIDRS", "").split(",") if c.strip()]
+        self.discovery_interval_min: int = int(env("AGENTCHAT_DISCOVERY_INTERVAL_MIN", "60"))
+        self.discovery_concurrency: int = int(env("AGENTCHAT_DISCOVERY_CONCURRENCY", "128"))
+        self.discovery_snmp_community: str = env("AGENTCHAT_DISCOVERY_SNMP_COMMUNITY", "public")
+        self.discovery_agent: str = env("AGENTCHAT_DISCOVERY_AGENT", "scout")
+        self.cert_warn_days: int = int(env("AGENTCHAT_CERT_WARN_DAYS", "14"))
+        self.history_days: int = int(env("AGENTCHAT_HISTORY_DAYS", "31"))
+        self.status_title: str = env("AGENTCHAT_STATUS_TITLE", "Service status")
+        # Tailscale auto-discovery (read-only: GET /localapi/v0/status only)
+        self.tailscale_sync: bool = _env_bool("AGENTCHAT_TAILSCALE", True)
+        self.tailscale_socket: str = env("AGENTCHAT_TAILSCALE_SOCKET", "/var/run/tailscale/tailscaled.sock")
+        self.tailscale_interval_min: int = int(env("AGENTCHAT_TAILSCALE_INTERVAL_MIN", "5"))
+        self.tailscale_autoregister: bool = _env_bool("AGENTCHAT_TAILSCALE_AUTOREGISTER", True)
+        self.tailscale_sweep_routes: bool = _env_bool("AGENTCHAT_TAILSCALE_SWEEP_ROUTES", True)
         # Telephony — Asterisk ARI + self-hosted speech (OpenAI-compatible TTS/STT)
         self.ari_url: str = env("AGENTCHAT_ARI_URL", "")            # e.g. http://pbx.tailnet:8088/ari
         self.ari_user: str = env("AGENTCHAT_ARI_USER", "agentchat")
@@ -157,6 +177,8 @@ class AgentUpdate(BaseModel):
     source_ips: Optional[list[str]] = None
     model: Optional[str] = None
     voice: Optional[dict] = None
+    extension: Optional[str] = None
+    listens_alerts: Optional[bool] = None
 
 
 SELF_EDITABLE = {"role", "color", "webhook_url", "display_name", "bio", "status", "mood", "emoji", "tags", "voice"}
@@ -207,6 +229,48 @@ class OnboardIn(BaseModel):
     post_interval_min: int = 0
     webhook_url: Optional[str] = None
     model: Optional[str] = None
+    listens_alerts: bool = False
+
+
+class AssetIn(BaseModel):
+    name: str                       # handle, e.g. core-sw1
+    kind: str = "server"            # server | computer | switch | website | software | camera | printer | cron
+    target: str                     # host/IP, host:port, or URL
+    display_name: Optional[str] = None
+    description: str = ""
+    ports: list[int] = Field(default_factory=list)
+    community: Optional[str] = None
+    checks: Optional[list[dict]] = None
+    interval_s: int = 60
+    critical: bool = False
+    public: bool = False
+    warn_ms: Optional[float] = None
+    keyword: Optional[str] = None
+    grace_min: Optional[int] = None  # cron/push: alert when silent longer than this
+
+
+class AssetUpdate(BaseModel):
+    interval_s: Optional[int] = None
+    enabled: Optional[bool] = None
+    critical: Optional[bool] = None
+    public: Optional[bool] = None
+    checks: Optional[list[dict]] = None
+    target: Optional[str] = None
+    maintenance_minutes: Optional[int] = None
+
+
+class DiscoverIn(BaseModel):
+    cidrs: list[str]
+    ports: Optional[list[int]] = None
+
+
+class NotifierIn(BaseModel):
+    name: str
+    type: str
+    config: dict
+    min_severity: str = "warning"
+    recoveries: bool = True
+    enabled: bool = True
 
 
 class CallIn(BaseModel):
@@ -255,6 +319,9 @@ class Network:
         self._ip_map: Optional[dict[str, str]] = None
         self.dropped = 0
         self.tel = Telephony(self)
+        self.watch = Watch(self)
+        self.notifier = Notifier(self)
+        self.tailscale = TailscaleSync(self)
         self.ensure_channel(s.default_channel, "Everyone, everything")
         for ch, topic in (("alerts", "Alerts from monitors and devices"), ("network", "SNMP traps"), ("syslog", "Device logs"),
                           *([(s.phone_channel, "Phone calls — live transcripts")] if s.ari_url else [])):
@@ -274,6 +341,8 @@ class Network:
         return self.store.one("SELECT * FROM agents WHERE name=?", (name.lower(),))
 
     def is_online(self, a: dict) -> bool:
+        if a.get("status") == "down":  # a watched asset that's down isn't "online", whatever else it did lately
+            return False
         now = time.time()
         return (a["name"] in self.hub.online_agents() or (a.get("last_seen") or 0) > now - 180
                 or (a.get("last_heartbeat") or 0) > now - 600 or bool(a.get("autopilot") and self.llm.configured))
@@ -284,6 +353,7 @@ class Network:
         out.update(display_name=a.get("display_name") or a["name"], tags=json.loads(a.get("tags") or "[]"),
                    heartbeat=json.loads(a.get("heartbeat") or "{}"), autopilot=bool(a.get("autopilot")),
                    model=a.get("model") or "", voice=json.loads(a.get("voice") or "{}"),
+                   extension=a.get("extension") or "", listens_alerts=bool(a.get("listens_alerts")),
                    has_webhook=bool(a.get("webhook_url")), online=self.is_online(a),
                    avatar_url=f"/api/agents/{a['name']}/avatar.svg")
         if full:
@@ -481,6 +551,12 @@ class Network:
             await self.notify(name, type_, author["name"], msg)
         if severity == "critical" and agent and self.s.oncall_number:
             self.spawn(self.tel.escalate(msg))
+        if not ch["is_dm"] and (kind == "alert" or (kind == "status" and severity == "ok")):
+            self.spawn(self.notifier.dispatch(msg))
+        if kind == "alert" and severity in ("warning", "error", "critical") and not ch["is_dm"]:
+            for an in self.store.all("SELECT name FROM agents WHERE listens_alerts=1 AND name!=?", (author["name"],)):
+                if an["name"] not in targets:
+                    await self.notify(an["name"], "alert", author["name"], msg)
         return msg
 
     async def react(self, actor: str, mid: int, emoji: str, on: bool = True) -> dict:
@@ -532,6 +608,9 @@ class Network:
              max(0, d.post_interval_min), persona["system_prompt"]))
         if d.model:
             self.store.run("UPDATE agents SET model=? WHERE name=?", (d.model, name))
+        used = {r["extension"] for r in self.store.all("SELECT extension FROM agents WHERE extension!=''")}
+        ext = next(str(n) for n in range(7100, 8000) if str(n) not in used)
+        self.store.run("UPDATE agents SET extension=?, listens_alerts=? WHERE name=?", (ext, int(d.listens_alerts), name))
         self._ip_map = None
         a = self.agent(name)
         human = self.s.human_name
@@ -617,6 +696,10 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             tasks.append(asyncio.create_task(Brain(net).run()))
         if net.tel.enabled:
             tasks.append(asyncio.create_task(net.tel.run()))
+        if s.watch:
+            tasks.append(asyncio.create_task(net.watch.run()))
+        if s.tailscale_sync and net.tailscale.available:
+            tasks.append(asyncio.create_task(net.tailscale.run()))
         if s.llm_base_url:
             log.info("LLM: %s model=%s (persona generation + autopilot enabled)", s.llm_base_url, s.llm_model)
         yield
@@ -680,7 +763,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "snmp_port": s.snmp_public_port if s.listeners and s.snmp_port else None,
                 "syslog_port": s.syslog_public_port if s.listeners and s.syslog_port else None,
                 "auto_onboard_devices": s.auto_onboard_devices, "ollama": bool(s.ollama_url),
-                "phone": net.tel.status()}
+                "phone": net.tel.status(), "asset_kinds": ASSET_KINDS, "notifier_types": NOTIFIER_TYPES,
+                "common_ports": {p: PORT_NAMES.get(p, str(p)) for p in COMMON_PORTS}, "status_title": s.status_title,
+                "discovery_cidrs": s.discovery_cidrs, "tailscale": net.tailscale.available}
 
     @app.get("/api/models")
     async def models(p: dict = Depends(principal)):
@@ -767,7 +852,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         for field, val in fields.items():  # field names come from the fixed pydantic model
             if field in ("tags", "source_ips", "voice"):
                 val = json.dumps(val)
-            elif field == "autopilot":
+            elif field in ("autopilot", "listens_alerts"):
                 val = int(bool(val))
             store.run(f"UPDATE agents SET {field}=? WHERE name=?", (val, name))
         net._ip_map = None
@@ -1000,6 +1085,180 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             "SELECT * FROM agents WHERE name LIKE ? OR display_name LIKE ? OR bio LIKE ? OR tags LIKE ? LIMIT 20",
             (like, like, like, like))]
         return {"agents": agents, "posts": net.query(p, ["(m.content LIKE ? OR m.author_name LIKE ?)"], [like, like], limit=50)}
+
+    # ---------- read-only monitoring: assets, discovery, notifications, status page
+    CHECK_TYPES = {"ping", "tcp", "http", "dns", "snmp", "snmp_if", "push", "tailscale"}
+
+    @app.post("/api/assets", status_code=201)
+    async def create_asset(body: AssetIn, request: Request, p: dict = Depends(principal)):
+        """Register something to watch (read-only). Creates its profile and starts checking it."""
+        require(p, "admin")
+        kind = body.kind if body.kind in KINDS else "server"
+        name = body.name.lower().strip()
+        if body.checks:
+            checks = body.checks
+        elif kind == "cron":
+            checks = [{"type": "push", "grace_s": (body.grace_min or 60) * 60}]
+        else:
+            checks = default_checks(kind, body.target, body.ports, body.community)
+        for c in checks:
+            if c.get("type") not in CHECK_TYPES:
+                raise HTTPException(422, f"check type must be one of {sorted(CHECK_TYPES)}")
+            if c["type"] == "http" and body.keyword:
+                c.setdefault("contains", body.keyword)
+            if body.warn_ms and c["type"] in ("http", "tcp", "ping"):
+                c.setdefault("warn_ms", body.warn_ms)
+        res = None
+        if not net.agent(name):
+            res = await net.onboard(OnboardIn(name=name, kind=kind, display_name=body.display_name,
+                                              description=body.description or f"{KINDS[kind]['label'].capitalize()} at {body.target}."),
+                                    base_url(request), p["name"])
+        aid = store.run("INSERT INTO assets(agent_name, name, kind, target, checks, interval_s, critical, public, created_at)"
+                        " VALUES (?,?,?,?,?,?,?,?,?)", (name, body.display_name or name, kind, body.target, json.dumps(checks),
+                                                        max(15, body.interval_s), int(body.critical), int(body.public), time.time()))
+        net.watch.running.add(aid)
+        net.spawn(net.watch.check_asset(aid))
+        out = {"asset": net.watch.public(store.one("SELECT * FROM assets WHERE id=?", (aid,))),
+               "agent": net.public_agent(net.agent(name))}
+        if res:
+            out.update(api_key=res["api_key"], ingest_url=res["ingest_url"],
+                       note="Store the API key and ingest URL now — they are not shown again.")
+        return out
+
+    @app.get("/api/assets")
+    def list_assets(p: dict = Depends(principal)):
+        return [net.watch.public(a) for a in store.all("SELECT * FROM assets ORDER BY name")]
+
+    @app.get("/api/assets/{aid}")
+    def get_asset(aid: int, hours: int = 24, p: dict = Depends(principal)):
+        a = store.one("SELECT * FROM assets WHERE id=?", (aid,))
+        if not a:
+            raise HTTPException(404, "asset not found")
+        return {**net.watch.public(a), "history": net.watch.history(aid, hours), "daily": net.watch.daily(aid)}
+
+    @app.patch("/api/assets/{aid}")
+    def update_asset(aid: int, body: AssetUpdate, p: dict = Depends(principal)):
+        require(p, "admin")
+        if not store.one("SELECT 1 FROM assets WHERE id=?", (aid,)):
+            raise HTTPException(404, "asset not found")
+        f = body.model_dump(exclude_unset=True)
+        if "maintenance_minutes" in f:
+            mm = f.pop("maintenance_minutes")
+            store.run("UPDATE assets SET maintenance_until=? WHERE id=?", (time.time() + mm * 60 if mm else None, aid))
+        if "checks" in f:
+            if any(c.get("type") not in CHECK_TYPES for c in f["checks"]):
+                raise HTTPException(422, "bad check type")
+            f["checks"] = json.dumps(f["checks"])
+        for k, v in f.items():  # keys come from the fixed pydantic model
+            store.run(f"UPDATE assets SET {k}=? WHERE id=?", (int(v) if isinstance(v, bool) else v, aid))
+        return net.watch.public(store.one("SELECT * FROM assets WHERE id=?", (aid,)))
+
+    @app.delete("/api/assets/{aid}", status_code=204)
+    def delete_asset(aid: int, p: dict = Depends(principal)):
+        require(p, "admin")
+        store.run("DELETE FROM assets WHERE id=?", (aid,))
+        store.run("DELETE FROM samples WHERE asset_id=?", (aid,))
+
+    @app.post("/api/assets/{aid}/check")
+    async def check_now(aid: int, p: dict = Depends(principal)):
+        require(p, "admin", "agent")
+        if not store.one("SELECT 1 FROM assets WHERE id=?", (aid,)):
+            raise HTTPException(404, "asset not found")
+        await net.watch.check_asset(aid)
+        return net.watch.public(store.one("SELECT * FROM assets WHERE id=?", (aid,)))
+
+    @app.post("/api/discover", status_code=202)
+    async def discover(body: DiscoverIn, p: dict = Depends(principal)):
+        """Read-only sweep of one or more subnets (TCP connect + ping + optional SNMP GET). Max /20 each."""
+        require(p, "admin")
+        if net.watch.discovering:
+            raise HTTPException(409, "a discovery is already running")
+        import ipaddress
+        try:
+            for c in body.cidrs:
+                if ipaddress.ip_network(c, strict=False).num_addresses > 4096:
+                    raise ValueError(f"{c} is larger than /20")
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        net.spawn(net.watch.discover(body.cidrs, body.ports, p["name"]))
+        return {"started": True, "cidrs": body.cidrs}
+
+    @app.get("/api/discoveries")
+    def discoveries(p: dict = Depends(principal)):
+        targets = {a["target"] for a in store.all("SELECT target FROM assets")}
+        out = []
+        for d in store.all("SELECT * FROM discoveries ORDER BY last_seen DESC, ip LIMIT 1000"):
+            d["ports"], d["snmp"] = json.loads(d["ports"]), json.loads(d["snmp"]) if d["snmp"] else None
+            d["registered"] = d["ip"] in targets or (d["hostname"] or "") in targets
+            out.append(d)
+        return {"running": net.watch.discovering, "hosts": out}
+
+    def _notifier_out(n: dict) -> dict:
+        n = dict(n)
+        cfg = json.loads(n["config"])
+        n["config"] = {k: ("••••" if k in ("bot_token", "password", "token") and v else v) for k, v in cfg.items()}
+        n["recoveries"], n["enabled"] = bool(n["recoveries"]), bool(n["enabled"])
+        return n
+
+    @app.get("/api/notifiers")
+    def list_notifiers(p: dict = Depends(principal)):
+        require(p, "admin")
+        return [_notifier_out(n) for n in store.all("SELECT * FROM notifiers ORDER BY id")]
+
+    @app.post("/api/notifiers", status_code=201)
+    def create_notifier(body: NotifierIn, p: dict = Depends(principal)):
+        require(p, "admin")
+        if body.type not in NOTIFIER_TYPES:
+            raise HTTPException(422, f"type must be one of {sorted(NOTIFIER_TYPES)}")
+        missing = [k for k in NOTIFIER_TYPES[body.type] if not body.config.get(k)]
+        if missing:
+            raise HTTPException(422, f"missing config: {missing}")
+        nid = store.run("INSERT INTO notifiers(name, type, config, min_severity, recoveries, enabled, created_at) VALUES (?,?,?,?,?,?,?)",
+                        (body.name, body.type, json.dumps(body.config), body.min_severity, int(body.recoveries),
+                         int(body.enabled), time.time()))
+        return _notifier_out(store.one("SELECT * FROM notifiers WHERE id=?", (nid,)))
+
+    @app.delete("/api/notifiers/{nid}", status_code=204)
+    def delete_notifier(nid: int, p: dict = Depends(principal)):
+        require(p, "admin")
+        store.run("DELETE FROM notifiers WHERE id=?", (nid,))
+
+    @app.post("/api/notifiers/{nid}/test")
+    async def test_notifier(nid: int, p: dict = Depends(principal)):
+        require(p, "admin")
+        n = store.one("SELECT * FROM notifiers WHERE id=?", (nid,))
+        if not n:
+            raise HTTPException(404, "not found")
+        try:
+            await notifier_send(n, {"id": 0, "author_name": SYSTEM_NAME, "severity": "info", "channel": "alerts",
+                                    "content": "✅ Test notification from your read-only AI comms NOC."})
+            return {"ok": True}
+        except Exception as e:
+            raise HTTPException(502, f"send failed: {e}")
+
+    @app.get("/api/tailscale")
+    def tailscale_status(p: dict = Depends(principal)):
+        return net.tailscale.summary()
+
+    @app.post("/api/tailscale/sync")
+    async def tailscale_sync(p: dict = Depends(principal)):
+        require(p, "admin")
+        try:
+            return await net.tailscale.sync()
+        except Exception as e:
+            raise HTTPException(502, f"tailscale: {e}")
+
+    @app.get("/api/status")
+    def status_json():
+        """Public, read-only status data for assets marked public."""
+        return {"title": s.status_title, "assets": [
+            {"name": a["name"], "kind": a["kind"], "status": json.loads(a["state"] or "{}").get("reported", "unknown"),
+             "in_maintenance": (a["maintenance_until"] or 0) > time.time(), "uptime": net.watch.uptime(a["id"]),
+             "daily": net.watch.daily(a["id"])} for a in store.all("SELECT * FROM assets WHERE public=1 ORDER BY name")]}
+
+    @app.get("/status", include_in_schema=False)
+    def status_page():
+        return FileResponse(STATIC_DIR / "status.html")
 
     # ---------- phone calls (Asterisk ARI)
     @app.post("/api/calls", status_code=201)

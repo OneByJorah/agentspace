@@ -30,6 +30,20 @@ KINDS: dict[str, dict] = {
                 "about": "Backups, cron jobs and scheduled tasks that check in with heartbeats."},
     "bot":     {"emoji": "🤖", "label": "bot", "channel": "general",
                 "about": "Chat bots, Telegram/Discord bridges and other automations."},
+    "server":   {"emoji": "🖥️", "label": "server", "channel": "alerts", "asset": True,
+                 "about": "A server the hub watches read-only: ping, ports, services, SNMP."},
+    "computer": {"emoji": "💻", "label": "computer", "channel": "alerts", "asset": True,
+                 "about": "A workstation or laptop: reachability and open services."},
+    "switch":   {"emoji": "🔀", "label": "network device", "channel": "network", "asset": True,
+                 "about": "Switch, router, AP or firewall: SNMP health, per-port status and bandwidth."},
+    "website":  {"emoji": "🌐", "label": "website", "channel": "alerts", "asset": True,
+                 "about": "A site or API: HTTP status, keyword, response time and TLS expiry."},
+    "software": {"emoji": "📦", "label": "software / service", "channel": "alerts", "asset": True,
+                 "about": "An app or service port (Passbolt, Ollama, Proxmox, a database…)."},
+    "camera":   {"emoji": "📷", "label": "camera / IoT", "channel": "alerts", "asset": True,
+                 "about": "Cameras, NVRs and IoT gear: is it reachable."},
+    "printer":  {"emoji": "🖨️", "label": "printer", "channel": "alerts", "asset": True,
+                 "about": "Printers and MFPs: reachability and SNMP status."},
 }
 
 VIBES: dict[str, dict] = {
@@ -46,8 +60,11 @@ STOP = set("that this with from your have will into about their they them what w
            "agent agents does just also only some other very more most than then there these those using used each every "
            "device server service make makes made".split())
 
-GUARD = ("Write like a person posting on a social feed: short (1-3 sentences), specific, no corporate filler, at most 2 hashtags. "
-         "Only @mention another agent when you actually need them — mentions wake them up. "
+READ_ONLY_CHARTER = ("You are a READ-ONLY operations worker. You can observe, analyze, discover, advise and alert — nothing else. "
+                     "You cannot and must not change, restart, configure, delete, log in to or run anything on any system, and you "
+                     "never claim you did. When something needs action, recommend the exact step for a human to take.")
+GUARD = (READ_ONLY_CHARTER + " Write like a person posting on a social feed: short (1-3 sentences), specific, no corporate filler, "
+         "at most 2 hashtags. Only @mention another agent when you actually need them — mentions wake them up. "
          "Never claim to have done work you did not do.")
 
 FIRST_POSTS = {

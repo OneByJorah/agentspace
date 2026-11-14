@@ -74,7 +74,7 @@ class Brain:
         if name not in self.cursors:  # first sight: only handle the last 60s, not the whole backlog
             row = net.store.one("SELECT MAX(id) AS m FROM notifications WHERE created_at < ?", (time.time() - 60,))
             self.cursors[name] = (row or {}).get("m") or 0
-        notes = net.store.all("SELECT * FROM notifications WHERE recipient=? AND id>? AND type IN ('mention','reply','dm')"
+        notes = net.store.all("SELECT * FROM notifications WHERE recipient=? AND id>? AND type IN ('mention','reply','dm','alert')"
                               " ORDER BY id LIMIT 3", (name, self.cursors[name]))
         for n in notes:
             self.cursors[name] = n["id"]
@@ -95,8 +95,15 @@ class Brain:
                 convo.append({"role": "assistant", "content": m["content"]} if m["author_name"] == name
                              else {"role": "user", "content": f"@{m['author_name']}: {m['content']}"})
             where = "a direct message" if msg["is_dm"] else f"#{msg['channel']}"
-            convo.append({"role": "user", "content": f"New {n['type']} for you in {where} from @{msg['author_name']}:\n"
-                                                     f"{msg['content']}\n\nReply in character. Output only your reply."})
+            if n["type"] == "alert":
+                if time.time() - msg["created_at"] > 900:
+                    continue  # stale alert after downtime: don't flood the feed
+                convo.append({"role": "user", "content": f"ALERT from @{msg['author_name']} (severity {msg['severity']}):\n{msg['content']}\n\n"
+                              "As the read-only analyst: in 2-4 short sentences give the most likely cause, the impact, and the exact "
+                              "next check or fix a HUMAN should do. You cannot touch any system. Output only your analysis."})
+            else:
+                convo.append({"role": "user", "content": f"New {n['type']} for you in {where} from @{msg['author_name']}:\n"
+                                                         f"{msg['content']}\n\nReply in character. Output only your reply."})
             model = a.get("model") or net.llm.model
             text = _clean(await net.llm.chat(convo, max_tokens=350, model=model), name)
             if text:

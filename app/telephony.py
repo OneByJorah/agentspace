@@ -29,8 +29,23 @@ from fastapi import HTTPException
 
 log = logging.getLogger("agentchat.phone")
 BYE = re.compile(r"\b(bye|goodbye|good bye|hang up|that'?s all|adi[oó]s|chao|ciao)\b", re.I)
-PHONE_GUARD = ("You are speaking on a live phone call. Reply in one or two short, natural spoken sentences. "
+PHONE_GUARD = ("You are read-only: you can explain, advise and alert, but never change or run anything — say what a human "
+               "should do instead. You are speaking on a live phone call. Reply in one or two short, natural spoken sentences. "
                "No markdown, no emoji, no lists, no URLs, no code. If the caller says goodbye, say a brief goodbye.")
+
+
+def fix_wav_sizes(wav: bytes) -> bytes:
+    """ffmpeg writing to a pipe can't seek back, so RIFF/data sizes are left as 0xFFFFFFFF.
+    Asterisk's format_wav rejects that ("Unable to open format wav"), so fill in the real sizes."""
+    if wav[:4] != b"RIFF" or wav[8:12] != b"WAVE":
+        return wav
+    i = wav.find(b"data", 12)
+    if i < 0:
+        return wav
+    b = bytearray(wav)
+    b[4:8] = (len(b) - 8).to_bytes(4, "little")
+    b[i + 4:i + 8] = (len(b) - i - 8).to_bytes(4, "little")
+    return bytes(b)
 
 
 class Call:
@@ -142,6 +157,9 @@ class Telephony:
                 call.channel = cid
                 self.by_channel[cid] = call.id
                 self.net.spawn(self.converse(call))
+            elif args[:1] == ["ext"] and len(args) > 1:
+                a = self.net.store.one("SELECT name FROM agents WHERE extension=?", (args[1],))
+                await self.incoming(cid, a["name"] if a else "", (ch.get("caller") or {}).get("number") or "unknown")
             elif args[:1] == ["in"]:
                 await self.incoming(cid, args[1] if len(args) > 1 else self.s.phone_default_agent,
                                     (ch.get("caller") or {}).get("number") or "unknown")
@@ -168,10 +186,13 @@ class Telephony:
         if not self.ffmpeg:
             return data
         p = await asyncio.create_subprocess_exec(self.ffmpeg, "-hide_banner", "-loglevel", "error", "-i", "pipe:0",
-                                                 "-ar", "8000", "-ac", "1", "-c:a", "pcm_s16le", "-f", "wav", "pipe:1",
+                                                 "-ar", "8000", "-ac", "1", "-c:a", "pcm_s16le",
+                                                 # plain 44-byte header: Asterisk's format_wav rejects ffmpeg's LIST/INFO chunk
+                                                 "-map_metadata", "-1", "-fflags", "+bitexact", "-flags:a", "+bitexact",
+                                                 "-f", "wav", "pipe:1",
                                                  stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE)
         out, _ = await p.communicate(data)
-        return out or data
+        return fix_wav_sizes(out) if out else data
 
     async def tts(self, text: str, agent: dict) -> bytes:
         voice = json.loads(agent.get("voice") or "{}").get("tts_voice") or self.s.tts_voice
@@ -196,7 +217,15 @@ class Telephony:
         if self.s.asterisk_sounds_dir:  # shared volume mounted into Asterisk's sounds dir
             d = Path(self.s.asterisk_sounds_dir)
             d.mkdir(parents=True, exist_ok=True)
+            cutoff = time.time() - 3600
+            for old in d.glob("*.wav"):  # speech clips are single-use; keep the folder small
+                try:
+                    if old.stat().st_mtime < cutoff:
+                        old.unlink()
+                except OSError:
+                    pass
             (d / f"{mid}.wav").write_bytes(data)
+            (d / f"{mid}.wav").chmod(0o644)
             return f"sound:{self.s.asterisk_sounds_prefix}/{mid}"
         base = self.s.phone_media_url or self.s.public_url
         if not base:

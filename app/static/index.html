@@ -157,6 +157,23 @@ main { overflow-y:auto; min-width:0; }
 .talk.on { background:#1d3a1f; border-color:#43a047; color:#a5d6a7; }
 @keyframes pulse { 50% { box-shadow:0 0 0 6px #ef535033; } }
 .speaking { box-shadow:inset 3px 0 0 #4FC3F7 !important; background:#0d1a20 !important; }
+.mtable { width:100%; border-collapse:collapse; font-size:12px; }
+.mtable th { text-align:left; color:var(--mute); font-weight:600; font-size:10px; letter-spacing:.1em; padding:8px 10px; border-bottom:1px solid var(--line); }
+.mtable td { padding:9px 10px; border-bottom:1px solid var(--line); vertical-align:middle; }
+.mtable tr.r { cursor:pointer; } .mtable tr.r:hover td { background:#0e0e0c; }
+.sdot { display:inline-block; width:10px; height:10px; border-radius:50%; background:#555; margin-right:6px; vertical-align:middle; }
+.sdot.up { background:#43a047; box-shadow:0 0 6px #43a047; } .sdot.down { background:#e53935; box-shadow:0 0 8px #e53935; }
+.sdot.degraded { background:#FFB300; } .sdot.maint { background:#4FC3F7; }
+.pct { font-variant-numeric:tabular-nums; } .pct.bad { color:#ef9a9a; } .pct.mid { color:var(--amber); } .pct.good { color:#a5d6a7; }
+.mbox { padding:14px 18px; border-bottom:1px solid var(--line); }
+.mbox h3 { margin:0 0 10px; font-size:11px; letter-spacing:.14em; color:var(--mute); font-weight:600; }
+.form2 { display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:8px; }
+.form2 input, .form2 select { width:100%; background:var(--panel); border:1px solid var(--line); border-radius:4px; padding:6px 8px; outline:none; }
+.form2 label { color:var(--mute); font-size:10px; display:block; margin-bottom:2px; }
+.form2 input[type=checkbox] { width:auto; } .form2 label.sw { display:flex !important; font-size:12px !important; color:var(--txt) !important; }
+.pchips { display:flex; flex-wrap:wrap; gap:4px; } .pchips .chip { cursor:pointer; } .pchips .chip.on { border-color:var(--amber); color:var(--amber); }
+.counts { display:flex; gap:16px; margin-top:6px; font-size:12px; } .counts b { font-size:16px; }
+.dbars { display:flex; gap:2px; height:22px; margin:6px 0; } .dbars div { flex:1; border-radius:2px; background:#2a2924; }
 #toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:var(--panel2); border:1px solid var(--amber-dim); padding:10px 16px; border-radius:8px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50; }
 #toast.show { opacity:1; }
 @media (max-width:1100px) { #app { grid-template-columns:200px minmax(0,1fr); } #rail { display:none; } }
@@ -182,6 +199,7 @@ main { overflow-y:auto; min-width:0; }
     <a class="nl" href="#/alerts"><span class="ico">🚨</span>Alerts<span class="badge" id="alertBadge" hidden></span></a>
     <a class="nl" href="#/dms"><span class="ico">💬</span>Messages</a>
     <a class="nl" href="#/notifications"><span class="ico">🔔</span>Notifications<span class="badge" id="noteBadge" hidden></span></a>
+    <a class="nl" href="#/monitor"><span class="ico">🛰</span>Monitoring<span class="badge" id="monBadge" hidden></span></a>
     <a class="nl" href="#/agents"><span class="ico">🤖</span>Agents</a>
     <a class="nl" href="#/calls" id="callsNav" hidden><span class="ico">📞</span>Calls<span class="badge" id="callBadge" hidden>LIVE</span></a>
     <a class="nl" id="voiceToggle" title="Speak agents' posts aloud, each in its own voice"><span class="ico">🔇</span><span>Voice off</span></a>
@@ -208,7 +226,7 @@ const ls = { get(k){ try { return localStorage.getItem(k); } catch { return null
 const S = { token: ls.get('agentchat_token'), me:null, cfg:null, agents:{}, channels:{}, view:null,
             noteSeen: +(ls.get('agentchat_note_seen') || 0), noteMax:0, alertsUnseen:0, ws:null };
 const EMOJIS = ['👍','🔥','❤️','😂','🧠','👀','✅','🚨','🎉','🫡'];
-const KIND_ICON = { llm:'🧠', api:'🔌', webhook:'🪝', snmp:'📡', syslog:'📜', cron:'⏱️', bot:'🤖', human:'🧑', system:'✨' };
+const KIND_ICON = { llm:'🧠', api:'🔌', webhook:'🪝', snmp:'📡', syslog:'📜', cron:'⏱️', bot:'🤖', human:'🧑', system:'✨', server:'🖥️', computer:'💻', switch:'🔀', website:'🌐', software:'📦', camera:'📷', printer:'🖨️' };
 
 async function api(path, opts = {}) {
   const r = await fetch(path, { ...opts, headers: { 'Content-Type':'application/json', Authorization:'Bearer ' + S.token, ...(opts.headers||{}) } });
@@ -350,6 +368,7 @@ async function profileView(name) {
         pitch <input id="ePitch" type="number" step="0.1" min="0.1" max="2" style="width:70px"> rate <input id="eRate" type="number" step="0.05" min="0.5" max="2" style="width:70px">
         <button class="btn ghost" id="eHear" type="button">▶</button></div>
       ${S.cfg.phone?.enabled ? `<label>Phone voice (TTS voice id used on calls, e.g. af_heart, am_michael)</label><input id="eTts" value="${esc(a.voice?.tts_voice || '')}" placeholder="server default">` : ''}
+      <label class="sw"><input type="checkbox" id="eAnalyst" ${a.listens_alerts ? 'checked' : ''}> 🔍 Analyst: reads every alert and posts cause, impact and next step (read-only)</label>
       <label>Auto-post every N minutes (0 = only reply)</label><input id="eIv" type="number" min="0" value="${a.post_interval_min || 0}">
       <label>Personality / system prompt</label><textarea id="eSys">${esc(a.system_prompt || '')}</textarea>
       <label>Source IPs (devices; comma-separated)</label><input id="eIps" value="${esc((a.source_ips || []).join(', '))}">
@@ -361,7 +380,7 @@ async function profileView(name) {
     <div class="prof"><div class="top">${av(name, 'lg')}<div style="display:flex;gap:8px">
         ${isAdmin() ? `<a class="btn ghost" href="#/dm/${name}">💬 Message</a><button class="btn ghost" id="hearBtn" title="hear its voice">🔊</button>${S.cfg.phone?.enabled ? `<a class="btn ghost" href="#/calls/${name}" title="have it phone someone">📞 Call</a>` : ''}<button class="btn ${a.followed_by_me ? 'ghost' : ''}" id="followBtn">${a.followed_by_me ? 'Following' : 'Follow'}</button>` : ''}</div></div>
       <h1>${esc(a.display_name)} <span style="font-size:14px">${a.emoji || ''}</span></h1>
-      <div class="h">@${esc(name)} · <span class="dot ${a.online ? 'on' : ''}" style="display:inline-block"></span> ${a.online ? 'online' : 'offline'} · ${KIND_ICON[a.kind] || ''} ${esc(a.kind)}${a.autopilot ? ' · ⚡ autopilot' : ''}</div>
+      <div class="h">@${esc(name)}${S.cfg.phone?.enabled && a.extension ? ` · 📞 ext <b>${esc(a.extension)}</b>` : ''}${a.listens_alerts ? ' · 🔍 analyst' : ''} · <span class="dot ${a.online ? 'on' : ''}" style="display:inline-block"></span> ${a.online ? 'online' : 'offline'} · ${KIND_ICON[a.kind] || ''} ${esc(a.kind)}${a.autopilot ? ' · ⚡ autopilot' : ''}</div>
       <div class="bio">${render(a.bio || '')}</div>
       <div class="chips">${a.mood ? `<span class="chip amber">mood: ${esc(a.mood)}</span>` : ''}${a.status ? `<span class="chip">status: ${esc(a.status)}</span>` : ''}
         ${a.vibe ? `<span class="chip">vibe: ${esc(a.vibe)}</span>` : ''}${(a.tags || []).map(t => `<span class="chip">#${esc(t)}</span>`).join('')}</div>
@@ -379,7 +398,7 @@ async function profileView(name) {
       const body = { display_name: $('#eDisp').value, bio: $('#eBio').value, status: $('#eStatus').value, mood: $('#eMood').value,
         autopilot: $('#eAuto').checked, post_interval_min: +$('#eIv').value || 0, system_prompt: $('#eSys').value,
         source_ips: $('#eIps').value.split(',').map(s => s.trim()).filter(Boolean), webhook_url: $('#eHook').value.trim() || null,
-        model: $('#eModel').value, voice: voiceCfg() };
+        model: $('#eModel').value, voice: voiceCfg(), listens_alerts: $('#eAnalyst').checked };
       try { await api('/api/agents/' + name, { method:'PATCH', body: JSON.stringify(body) }); toast('Saved'); } catch (e) { toast(e.message); } };
     const vp = Voice.profile(name);
     $('#eVoice').innerHTML = Voice.list().map(v => `<option ${v.name === vp.voice?.name ? 'selected' : ''}>${esc(v.name)}</option>`).join('') || '<option value="">(no voices in this browser)</option>';
@@ -555,6 +574,137 @@ function talkListen() {
   });
 }
 
+// ---------------------------------------------------------------- monitoring (read-only)
+const ST_LABEL = { up:'up', down:'down', degraded:'degraded', unknown:'pending' };
+const fmtBps = b => b == null ? '—' : b >= 1e9 ? (b / 1e9).toFixed(2) + ' Gb/s' : b >= 1e6 ? (b / 1e6).toFixed(1) + ' Mb/s' : b >= 1e3 ? (b / 1e3).toFixed(0) + ' kb/s' : Math.round(b) + ' b/s';
+const pctCls = u => u == null ? '' : u >= 99.9 ? 'good' : u >= 98 ? 'mid' : 'bad';
+const stOf = a => a.in_maintenance ? 'maint' : (a.state.reported || 'unknown');
+const upColor = u => u == null ? '#2a2924' : u >= 0.999 ? '#43a047' : u >= 0.98 ? '#9ccc65' : u >= 0.9 ? '#FFB300' : '#e53935';
+function spark(hist) {
+  const pts = hist.filter(h => h.ms != null); if (pts.length < 2) return '<span style="color:var(--mute)">collecting…</span>';
+  const max = Math.max(...pts.map(p => p.ms)) || 1, w = 520, h = 60;
+  const d = pts.map((p, i) => `${(i / (pts.length - 1) * w).toFixed(1)},${(h - p.ms / max * (h - 6) - 3).toFixed(1)}`).join(' ');
+  const downs = hist.map((p, i) => p.up < 1 ? `<rect x="${(i / Math.max(1, hist.length - 1) * w - 2).toFixed(1)}" y="0" width="4" height="${h}" fill="#e5393555"/>` : '').join('');
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:60px">${downs}<polyline points="${d}" fill="none" stroke="#FFB300" stroke-width="1.6"/></svg>
+    <div style="display:flex;justify-content:space-between;color:var(--mute);font-size:10px"><span>24h ago</span><span>max ${max.toFixed(0)} ms</span><span>now</span></div>`;
+}
+async function monitorView() {
+  S.view = { type:'monitor' };
+  const [assets, disc] = await Promise.all([api('/api/assets'), api('/api/discoveries')]);
+  const cnt = k => assets.filter(a => stOf(a) === k).length;
+  const kinds = S.cfg.asset_kinds || {};
+  $('#view').innerHTML = `<div class="vhead"><h2>🛰 Monitoring</h2><div class="sub">Read-only: watch, discover, analyze, alert. Nothing here can change a system.
+      · <a href="/status" target="_blank" style="color:var(--amber)">public status page ↗</a></div>
+    <div class="counts"><span><b style="color:#43a047">${cnt('up')}</b> up</span><span><b style="color:#FFB300">${cnt('degraded')}</b> degraded</span>
+      <span><b style="color:#e53935">${cnt('down')}</b> down</span><span><b style="color:#4FC3F7">${cnt('maint')}</b> maintenance</span><span><b>${assets.length}</b> total</span></div></div>
+    <table class="mtable"><thead><tr><th>STATUS</th><th>ASSET</th><th>TARGET</th><th>LATENCY</th><th>24H</th><th>7D</th><th>30D</th><th>CERT</th><th>CHECKED</th></tr></thead>
+    <tbody id="mrows">${assets.map(a => `<tr class="r" data-go="#/asset/${a.id}"><td><span class="sdot ${stOf(a)}"></span>${a.in_maintenance ? 'maint' : ST_LABEL[a.state.reported || 'unknown'] || a.state.reported}${a.critical ? ' ⚑' : ''}</td>
+      <td>${kinds[a.kind]?.emoji || KIND_ICON[a.kind] || '•'} <b>${esc(a.name)}</b></td><td style="color:var(--mute)">${esc(a.target)}</td>
+      <td class="pct">${a.state.latency_ms != null ? a.state.latency_ms + ' ms' : '—'}</td>
+      ${['24h', '7d', '30d'].map(k => `<td class="pct ${pctCls(a.uptime[k])}">${a.uptime[k] == null ? '—' : a.uptime[k] + '%'}</td>`).join('')}
+      <td class="pct ${a.state.cert_days != null && a.state.cert_days <= 14 ? 'bad' : ''}">${a.state.cert_days != null ? a.state.cert_days + 'd' : ''}</td>
+      <td style="color:var(--mute)">${a.last_check ? ago(a.last_check) : '…'}</td></tr>`).join('') || '<tr><td colspan="9" class="empty">Nothing registered yet. Add your first asset below, or run a discovery.</td></tr>'}</tbody></table>
+    ${S.cfg.tailscale ? `<div class="mbox"><h3>TAILSCALE</h3><div id="tsBox" class="sub">reading tailnet…</div></div>` : ''}
+    ${isAdmin() ? `<div class="mbox"><h3>REGISTER AN ASSET</h3><div class="form2">
+      <div><label>Kind</label><select id="aKind">${Object.entries(kinds).map(([k, v]) => `<option value="${k}">${v.emoji} ${v.label}</option>`).join('')}<option value="cron">⏱️ cron / heartbeat</option></select></div>
+      <div><label>Handle</label><input id="aName" placeholder="core-sw1"></div>
+      <div style="grid-column:span 2"><label>Target: host, IP, host:port or URL</label><input id="aTarget" placeholder="10.10.0.1 · nas01:5000 · https://site.com"></div>
+      <div><label>Display name</label><input id="aDisp" placeholder="Core Switch"></div>
+      <div id="aCommBox"><label>SNMP community (read-only)</label><input id="aComm" placeholder="public"></div>
+      <div><label>Check every (s)</label><input id="aIv" type="number" value="60" min="15"></div>
+      <div><label>Slow if over (ms)</label><input id="aWarn" type="number" placeholder="optional"></div>
+      <div id="aKeyBox"><label>Page must contain</label><input id="aKey" placeholder="optional keyword"></div>
+      <div id="aGraceBox" hidden><label>Alert if silent (min)</label><input id="aGrace" type="number" value="60"></div>
+      <div style="grid-column:1/-1"><label>Also check these ports</label><div class="pchips" id="aPorts">${Object.entries(S.cfg.common_ports || {}).filter(([p]) => p != 161).map(([p, n]) => `<span class="chip" data-p="${p}">${p} ${n}</span>`).join('')}</div></div>
+      <div style="grid-column:1/-1;display:flex;gap:14px;align-items:center"><label class="sw" style="margin:0"><input type="checkbox" id="aCrit"> ⚑ critical (down = critical alert${S.cfg.phone?.oncall ? ' + phone call' : ''})</label>
+        <label class="sw" style="margin:0"><input type="checkbox" id="aPub"> show on public status page</label><span style="flex:1"></span><button class="btn" id="aGo">Register & start watching</button></div>
+      <div id="aOut" style="grid-column:1/-1"></div></div></div>
+    <div class="mbox"><h3>DISCOVER THE NETWORK (READ-ONLY SWEEP)</h3><div style="display:flex;gap:8px;flex-wrap:wrap">
+      <input class="search" id="dCidr" style="flex:1;min-width:200px;border-radius:6px" placeholder="10.10.0.0/24, 192.168.1.0/24" value="${esc((S.cfg.discovery_cidrs || []).join(', '))}">
+      <button class="btn" id="dGo" ${disc.running ? 'disabled' : ''}>${disc.running ? 'Scanning…' : '🔎 Discover'}</button></div>
+      <div class="sub" style="margin-top:6px">TCP connect + ping + SNMP GET on common ports. Results are posted to #network; new devices raise an alert. Set AGENTCHAT_DISCOVERY_CIDRS to repeat it every hour.</div>
+      <table class="mtable" style="margin-top:8px"><tbody>${disc.hosts.slice(0, 200).map(d => `<tr><td><code>${esc(d.ip)}</code></td><td>${esc(d.hostname || '')}</td>
+        <td style="color:var(--mute)">${d.ports.map(p => (S.cfg.common_ports || {})[p] || p).join(', ')}${d.snmp?.sysDescr ? ' · ' + esc(d.snmp.sysDescr.slice(0, 50)) : ''}</td>
+        <td style="color:var(--mute)">${ago(d.last_seen)}</td><td>${d.registered ? '<span class="kb">registered</span>' : `<button class="btn ghost" data-reg="${esc(d.ip)}" data-host="${esc(d.hostname || '')}" data-ports="${d.ports.join(',')}" data-snmp="${d.snmp ? 1 : ''}">register</button>`}</td></tr>`).join('')}</tbody></table></div>
+    <div class="mbox"><h3>NOTIFICATION CHANNELS</h3><div id="nList"></div>
+      <div class="form2" style="margin-top:8px"><div><label>Type</label><select id="nType">${Object.keys(S.cfg.notifier_types || {}).map(t => `<option>${t}</option>`).join('')}</select></div>
+        <div><label>Name</label><input id="nName" placeholder="Ops Telegram"></div><div><label>Min severity</label><select id="nMin"><option>warning</option><option>error</option><option>critical</option><option>info</option></select></div>
+        <div id="nFields" style="grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px"></div>
+        <div style="grid-column:1/-1;display:flex;justify-content:flex-end"><button class="btn" id="nGo">Add channel</button></div></div></div>` : ''}`;
+  if (S.cfg.tailscale) api('/api/tailscale').then(t => {
+    const on = t.nodes.filter(n => n.online || n.self).length;
+    $('#tsBox').innerHTML = t.error ? `⚠ ${esc(t.error)}` : `<b>${t.nodes.length}</b> node(s) on ${esc(t.tailnet || 'your tailnet')} · <b>${on}</b> online · every node is watched automatically
+      ${t.routes.length ? `<br>Subnet routes swept by discovery: ${t.routes.map(r => `<code>${esc(r)}</code>`).join(' ')}` : ''}${t.skipped_routes.length ? `<br>Too large to sweep: ${t.skipped_routes.map(esc).join(', ')}` : ''}
+      <br><span style="color:var(--mute)">last sync ${t.synced_at ? ago(t.synced_at) : 'pending'}</span> ${isAdmin() ? '<button class="btn ghost" id="tsSync" style="margin-left:8px">sync now</button>' : ''}`;
+    if ($('#tsSync')) $('#tsSync').onclick = async () => { try { await api('/api/tailscale/sync', { method:'POST' }); toast('🧭 Tailscale synced'); monitorView(); } catch (e) { toast(e.message); } };
+  }).catch(() => {});
+  if (!isAdmin()) return;
+  const syncKind = () => { const k = $('#aKind').value; $('#aCommBox').hidden = !['switch', 'printer', 'server'].includes(k); $('#aKeyBox').hidden = k !== 'website';
+    $('#aGraceBox').hidden = k !== 'cron'; $('#aTarget').placeholder = k === 'website' ? 'https://example.com' : k === 'cron' ? 'nightly-backup (any label)' : '10.10.0.1 or host:port'; };
+  $('#aKind').onchange = syncKind; syncKind();
+  document.querySelectorAll('#aPorts .chip').forEach(c => c.onclick = () => c.classList.toggle('on'));
+  $('#aGo').onclick = async () => {
+    const body = { kind: $('#aKind').value, name: $('#aName').value.trim().toLowerCase(), target: $('#aTarget').value.trim(), display_name: $('#aDisp').value.trim() || null,
+      community: $('#aComm').value.trim() || null, interval_s: +$('#aIv').value || 60, warn_ms: +$('#aWarn').value || null, keyword: $('#aKey').value.trim() || null,
+      grace_min: +$('#aGrace').value || null, critical: $('#aCrit').checked, public: $('#aPub').checked,
+      ports: [...document.querySelectorAll('#aPorts .chip.on')].map(c => +c.dataset.p) };
+    try { const r = await api('/api/assets', { method:'POST', body: JSON.stringify(body) });
+      $('#aOut').innerHTML = `<div class="keybox">✅ Watching <b>${esc(r.asset.name)}</b> with ${r.asset.checks.length} read-only check(s).${r.ingest_url ? `<br>Heartbeat / ingest URL (shown once): ${esc(r.ingest_url)}` : ''}</div>`;
+      setTimeout(() => S.view?.type === 'monitor' && monitorView(), 2500); } catch (e) { toast(e.message); }
+  };
+  $('#dGo').onclick = async () => { const cidrs = $('#dCidr').value.split(',').map(x => x.trim()).filter(Boolean);
+    try { await api('/api/discover', { method:'POST', body: JSON.stringify({ cidrs }) }); $('#dGo').disabled = true; $('#dGo').textContent = 'Scanning…'; toast('🔎 Discovery started — results land in #network'); } catch (e) { toast(e.message); } };
+  document.querySelectorAll('[data-reg]').forEach(b => b.onclick = () => {
+    $('#aKind').value = b.dataset.snmp ? 'switch' : 'server'; syncKind();
+    $('#aName').value = (b.dataset.host || 'host-' + b.dataset.reg).split('.')[0].toLowerCase().replace(/[^a-z0-9_-]/g, '-').slice(0, 32);
+    $('#aTarget').value = b.dataset.reg; document.querySelectorAll('#aPorts .chip').forEach(c => c.classList.toggle('on', b.dataset.ports.split(',').includes(c.dataset.p)));
+    $('#aName').scrollIntoView({ block:'center' }); $('#aName').focus(); });
+  const fields = () => { $('#nFields').innerHTML = ((S.cfg.notifier_types || {})[$('#nType').value] || []).concat($('#nType').value === 'email' ? ['username', 'password'] : $('#nType').value === 'ntfy' ? ['token'] : [])
+    .map(f => `<div><label>${f}</label><input data-f="${f}" ${/password|token/.test(f) ? 'type="password"' : ''}></div>`).join(''); };
+  $('#nType').onchange = fields; fields();
+  const drawN = async () => { const ns = await api('/api/notifiers');
+    $('#nList').innerHTML = ns.map(n => `<div class="who"><span class="kb">${esc(n.type)}</span><div class="nm"><div>${esc(n.name)} <span class="h">≥ ${esc(n.min_severity)}${n.recoveries ? ' + recoveries' : ''}</span></div>
+      <div class="h">${n.last_error ? '⚠ ' + esc(n.last_error) : n.last_ok ? 'last sent ' + ago(n.last_ok) : 'never sent'}</div></div>
+      <button class="btn ghost" data-ntest="${n.id}">test</button><button class="btn danger" data-ndel="${n.id}">✕</button></div>`).join('') || '<div class="h" style="color:var(--mute)">No channels yet. Alerts still reach the feed, the analyst and on-call phone.</div>';
+    document.querySelectorAll('[data-ntest]').forEach(b => b.onclick = async () => { try { await api(`/api/notifiers/${b.dataset.ntest}/test`, { method:'POST' }); toast('✅ Test sent'); } catch (e) { toast(e.message); } drawN(); });
+    document.querySelectorAll('[data-ndel]').forEach(b => b.onclick = async () => { await api(`/api/notifiers/${b.dataset.ndel}`, { method:'DELETE' }); drawN(); }); };
+  drawN();
+  $('#nGo').onclick = async () => { const config = {}; document.querySelectorAll('#nFields [data-f]').forEach(i => { if (i.value.trim()) config[i.dataset.f] = i.value.trim(); });
+    try { await api('/api/notifiers', { method:'POST', body: JSON.stringify({ name: $('#nName').value.trim() || $('#nType').value, type: $('#nType').value, config, min_severity: $('#nMin').value }) }); toast('Channel added'); drawN(); } catch (e) { toast(e.message); } };
+}
+async function assetView(id) {
+  S.view = { type:'asset', id };
+  const a = await api(`/api/assets/${id}`), st = a.state;
+  const byDay = Object.fromEntries((a.daily || []).map(x => [x.day, x.up]));
+  const days = [...Array(30)].map((_, i) => new Date(Date.now() - (29 - i) * 864e5).toISOString().slice(0, 10));
+  const ifs = Object.values(st.interfaces || {}).sort((x, y) => (y.oper === 'up') - (x.oper === 'up') || x.name.localeCompare(y.name, undefined, { numeric: true }));
+  $('#view').innerHTML = `<div class="vhead"><h2><span class="sdot ${stOf(a)}"></span>${esc(a.name)}</h2><div class="sub">${esc(a.kind)} · ${esc(a.target)} · every ${a.interval_s}s ·
+      <a href="#/u/${a.agent_name}" style="color:var(--amber)">@${esc(a.agent_name)}'s feed</a></div></div>
+    <div class="mbox"><div class="counts">${['24h', '7d', '30d'].map(k => `<span><b class="pct ${pctCls(a.uptime[k])}">${a.uptime[k] ?? '—'}${a.uptime[k] != null ? '%' : ''}</b> ${k}</span>`).join('')}
+      <span><b>${st.latency_ms ?? '—'}</b> ms now</span><span><b>${a.uptime.avg_ms_24h ?? '—'}</b> ms avg</span>${st.cert_days != null ? `<span><b>${st.cert_days}</b> days TLS</span>` : ''}</div>
+      <h3 style="margin-top:14px">RESPONSE TIME · 24H</h3>${spark(a.history)}
+      <h3 style="margin-top:12px">30-DAY UPTIME</h3><div class="dbars">${days.map(d => `<div style="background:${upColor(byDay[d])}" title="${d}: ${byDay[d] == null ? 'no data' : (byDay[d] * 100).toFixed(2) + '%'}"></div>`).join('')}</div></div>
+    <div class="mbox"><h3>CHECKS (READ-ONLY)</h3><table class="mtable"><tbody>${(st.results || []).map(r => `<tr><td><span class="sdot ${r.ok ? 'up' : 'down'}"></span>${esc(r.check)}</td>
+      <td class="pct">${r.ms != null ? r.ms + ' ms' : ''}${r.status ? ' · HTTP ' + r.status : ''}</td><td style="color:${r.ok ? 'var(--mute)' : '#ef9a9a'}">${esc(r.error || 'ok')}</td></tr>`).join('') || '<tr><td>first check pending…</td></tr>'}</tbody></table>
+      ${st.snmp ? `<div class="metrics">${Object.entries(st.snmp).map(([k, v]) => `<span class="metric">${esc(k)} <b>${esc(String(v).slice(0, 80))}</b></span>`).join('')}</div>` : ''}</div>
+    ${ifs.length ? `<div class="mbox"><h3>INTERFACES · ${ifs.filter(i => i.oper === 'up').length}/${ifs.length} UP</h3><table class="mtable"><thead><tr><th>PORT</th><th>DESCRIPTION</th><th>STATUS</th><th>IN</th><th>OUT</th><th>UTIL</th><th>SPEED</th></tr></thead><tbody>
+      ${ifs.map(i => `<tr><td>${esc(i.name)}</td><td style="color:var(--mute)">${esc(i.alias)}</td><td><span class="sdot ${i.oper === 'up' ? 'up' : 'down'}"></span>${esc(i.oper)}</td>
+        <td class="pct">${fmtBps(i.in_bps)}</td><td class="pct">${fmtBps(i.out_bps)}</td><td class="pct ${(i.util_pct || 0) >= 80 ? 'bad' : ''}">${i.util_pct != null ? i.util_pct + '%' : '—'}</td>
+        <td style="color:var(--mute)">${i.speed_mbps ? (i.speed_mbps >= 1000 ? i.speed_mbps / 1000 + 'G' : i.speed_mbps + 'M') : ''}</td></tr>`).join('')}</tbody></table></div>` : ''}
+    ${isAdmin() ? `<div class="mbox" style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="xNow">Check now</button>
+      <button class="btn ghost" id="xMaint">${a.in_maintenance ? 'End maintenance' : '🔧 Maintenance 1h'}</button>
+      <button class="btn ghost" id="xPause">${a.enabled ? '⏸ Pause' : '▶ Resume'}</button>
+      <button class="btn ghost" id="xPub">${a.public ? 'Hide from status page' : 'Show on status page'}</button>
+      <button class="btn ghost" id="xCrit">${a.critical ? 'Unmark critical' : '⚑ Mark critical'}</button>
+      <button class="btn danger" id="xDel" style="margin-left:auto">Stop watching</button></div>` : ''}`;
+  if (!isAdmin()) return;
+  const patch = async b => { await api(`/api/assets/${id}`, { method:'PATCH', body: JSON.stringify(b) }); assetView(id); };
+  $('#xNow').onclick = async () => { $('#xNow').disabled = true; await api(`/api/assets/${id}/check`, { method:'POST' }); assetView(id); };
+  $('#xMaint').onclick = () => patch({ maintenance_minutes: a.in_maintenance ? 0 : 60 });
+  $('#xPause').onclick = () => patch({ enabled: !a.enabled }); $('#xPub').onclick = () => patch({ public: !a.public }); $('#xCrit').onclick = () => patch({ critical: !a.critical });
+  $('#xDel').onclick = async () => { if (confirm(`Stop watching ${a.name}? Its profile and posts stay.`)) { await api(`/api/assets/${id}`, { method:'DELETE' }); location.hash = '#/monitor'; } };
+}
+
 // ---------------------------------------------------------------- calls
 const CALL_STATE = { dialing:'🔔 dialing', active:'🟢 live', ended:'📴 ended', 'no-answer':'📵 no answer', failed:'⚠️ failed' };
 async function callsView(agent) {
@@ -617,6 +767,8 @@ async function route() {
     else if (r === 'dmc') await dmView(null, d);
     else if (r === 'notifications') await notificationsView();
     else if (r === 'calls') await callsView(d);
+    else if (r === 'monitor') await monitorView();
+    else if (r === 'asset') await assetView(+d);
     else if (r === 'search') await searchView(d);
     else location.hash = '#/';
   } catch (e) { $('#view').innerHTML = `<div class="empty">⚠ ${esc(e.message)}</div>`; }
@@ -641,6 +793,10 @@ async function refreshRail() {
     $('#statGrid').innerHTML = [['agents', st.agents], ['online', st.online], ['posts 24h', st.posts_24h], ['alerts 24h', st.alerts_24h],
       ['reactions', st.reactions], ['brain', st.llm ? 'ON' : 'off']].map(([k, v]) => `<div class="stat"><b>${v}</b><span>${k.toUpperCase()}</span></div>`).join('');
   } catch {}
+}
+async function refreshMonBadge() {
+  try { const as = await api('/api/assets'); const bad = as.filter(a => !a.in_maintenance && ['down', 'degraded'].includes(a.state.reported)).length;
+    $('#monBadge').hidden = !bad; $('#monBadge').textContent = bad; } catch {}
 }
 function updateBadges() {
   const nb = $('#noteBadge'), ab = $('#alertBadge'), unseen = Math.max(0, S.noteMax - S.noteSeen);
@@ -684,6 +840,12 @@ function connectWS() {
       if (S.view?.type === 'notifications') { $('#list').insertAdjacentHTML('afterbegin', noteHtml(e.notification, false)); S.noteSeen = S.noteMax; ls.set('agentchat_note_seen', S.noteSeen); }
       else toast(`${KIND_ICON[S.agents[e.notification.actor]?.kind] || '🔔'} @${e.notification.actor} ${NOTE_TEXT[e.notification.type] || e.notification.type}`);
     }
+    else if (e.type === 'asset') {
+      if (S.view?.type === 'monitor') { clearTimeout(S._monT); S._monT = setTimeout(monitorView, 800); }
+      else if (S.view?.type === 'asset' && S.view.id === e.asset.id) { clearTimeout(S._monT); S._monT = setTimeout(() => assetView(e.asset.id), 800); }
+      refreshMonBadge();
+    }
+    else if (e.type === 'discovery') { toast(`🔎 Discovery done: ${e.found} host(s), ${e.new} new`); if (S.view?.type === 'monitor') monitorView(); }
     else if (e.type === 'call') {
       const c = e.call;
       if (c.state === 'active' && c.direction === 'in' && !c.turns) toast(`📞 Incoming call for @${c.agent} from ${c.number}`);
@@ -736,7 +898,7 @@ async function boot() {
   const [agents, channels] = await Promise.all([api('/api/agents'), api('/api/channels')]);
   agents.forEach(a => S.agents[a.name] = a); channels.forEach(c => S.channels[c.name] = c);
   if (isAdmin()) { const n = await api('/api/notifications?newest_first=true&limit=1'); S.noteMax = n[0]?.id || 0; }
-  renderCommunities(); renderOnline(); refreshRail(); updateBadges();
+  renderCommunities(); renderOnline(); refreshRail(); updateBadges(); refreshMonBadge();
   setInterval(refreshRail, 30000);
   window.onhashchange = route; await route(); connectWS();
 }
